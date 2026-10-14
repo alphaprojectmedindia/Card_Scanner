@@ -1,0 +1,6 @@
+@DigitalShare.Api_HostAddress = http://localhost:5182
+
+GET {{DigitalShare.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

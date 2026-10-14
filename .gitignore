@@ -1,0 +1,40 @@
+# .NET
+backend/**/bin/
+backend/**/obj/
+backend/test-bin/
+*.user
+*.suo
+
+# Flutter / Dart
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/build/
+mobile/.pub-cache/
+mobile/android/.gradle/
+mobile/ios/Pods/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+appsettings.Production.json
+secrets.json
+
+# Signing keys
+*.jks
+*.keystore
+key.properties
+
+# Local uploads
+backend/DigitalShare.Api/uploads/
+
+# OS
+.DS_Store
+Thumbs.db
