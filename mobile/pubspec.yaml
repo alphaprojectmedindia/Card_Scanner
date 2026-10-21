@@ -39,10 +39,16 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.4.2
+  camera: ^0.12.1
   flutter_contacts: ^2.6.0
   image_picker: ^1.2.4
   google_mlkit_text_recognition: ^0.17.1
   url_launcher: ^6.3.3
+  image: ^4.12.0
+  flutter_onnxruntime: ^1.9.0
+  geolocator: ^14.1.2
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
 
 dev_dependencies:
   flutter_test:
@@ -77,6 +83,7 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/models/paddleocr/
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

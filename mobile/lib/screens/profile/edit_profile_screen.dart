@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config/api_config.dart';
 import '../../models/update_profile_request.dart';
 import '../../models/user_profile.dart';
 import '../../services/api_client.dart';
+import '../../services/pending_profile_photo_store.dart';
 import '../../services/profile_service.dart';
 import '../../widgets/custom_text_field.dart';
 import '../../widgets/error_banner.dart';
@@ -26,7 +28,7 @@ class EditProfileScreen extends StatefulWidget {
   State<EditProfileScreen> createState() => _EditProfileScreenState();
 }
 
-class _EditProfileScreenState extends State<EditProfileScreen> {
+class _EditProfileScreenState extends State<EditProfileScreen> with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   late final ProfileService _profileService;
   late final ImagePicker _imagePicker;
@@ -50,6 +52,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _profileService = widget.profileService ?? ProfileService();
     _imagePicker = widget.imagePicker ?? ImagePicker();
 
@@ -62,10 +65,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _websiteController = TextEditingController(text: widget.profile.website ?? '');
     _addressController = TextEditingController(text: widget.profile.address ?? '');
     _bioController = TextEditingController(text: widget.profile.bio ?? '');
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkLostDataAndUpload();
+    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _fullNameController.dispose();
     _phoneNumberController.dispose();
     _emailController.dispose();
@@ -75,6 +83,76 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _addressController.dispose();
     _bioController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkLostDataAndUpload();
+    }
+  }
+
+  /// Recovers image data if Android killed or recreated MainActivity while the external
+  /// camera app was active.
+  Future<void> _checkLostDataAndUpload() async {
+    if (_isUploadingPhoto || PendingProfilePhotoStore.isUploadInProgress) {
+      return;
+    }
+
+    final pending = await PendingProfilePhotoStore.loadPendingCapture();
+    if (pending == null) {
+      return;
+    }
+
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] lost-data recovery attempted');
+    }
+
+    try {
+      final LostDataResponse response = await _imagePicker.retrieveLostData();
+      if (response.isEmpty) {
+        if (kDebugMode) {
+          debugPrint('[ProfilePhotoFlow] lost-data recovery returned empty');
+        }
+        await PendingProfilePhotoStore.clear();
+        return;
+      }
+
+      if (response.exception != null) {
+        if (kDebugMode) {
+          debugPrint('[ProfilePhotoFlow] lost-data recovery failed: ${response.exception?.message}');
+        }
+        await PendingProfilePhotoStore.clear();
+        if (mounted) {
+          setState(() {
+            _errorMessage = response.exception?.message ?? 'Failed to recover captured photo.';
+          });
+        }
+        return;
+      }
+
+      final recoveredFile = response.file ??
+          (response.files != null && response.files!.isNotEmpty ? response.files!.first : null);
+
+      if (recoveredFile == null) {
+        if (kDebugMode) {
+          debugPrint('[ProfilePhotoFlow] lost-data recovery returned null file');
+        }
+        await PendingProfilePhotoStore.clear();
+        return;
+      }
+
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] lost-data recovery succeeded: ${recoveredFile.path}');
+      }
+
+      await _processAndUploadFile(recoveredFile);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] lost-data recovery exception: $e');
+      }
+      await PendingProfilePhotoStore.clear();
+    }
   }
 
   void _showPhotoOptionsSheet() {
@@ -138,6 +216,18 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _pickAndUploadImage(ImageSource source) async {
+    if (_isUploadingPhoto || PendingProfilePhotoStore.isUploadInProgress) {
+      return;
+    }
+
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] Change Photo tapped');
+      debugPrint('[ProfilePhotoFlow] source selected: ${source.name}');
+      debugPrint('[ProfilePhotoFlow] picker starting');
+    }
+
+    await PendingProfilePhotoStore.savePendingCapture(source: source.name);
+
     try {
       final XFile? pickedFile = await _imagePicker.pickImage(
         source: source,
@@ -147,44 +237,171 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
 
       if (pickedFile == null) {
-        // Selection cancelled by user gracefully
+        if (kDebugMode) {
+          debugPrint('[ProfilePhotoFlow] picker returned null, checking lost-data...');
+        }
+        final LostDataResponse lostData = await _imagePicker.retrieveLostData();
+        if (!lostData.isEmpty && lostData.file != null) {
+          if (kDebugMode) {
+            debugPrint('[ProfilePhotoFlow] lost-data recovered after null picker: ${lostData.file!.path}');
+          }
+          await _processAndUploadFile(lostData.file!);
+          return;
+        }
+
+        if (kDebugMode) {
+          debugPrint('[ProfilePhotoFlow] picker returned null (user cancelled)');
+        }
+        await PendingProfilePhotoStore.clear();
         return;
       }
 
-      final file = File(pickedFile.path);
-      final fileSize = await file.length();
-      const maxPhotoSizeBytes = 5 * 1024 * 1024; // 5 MB
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] picker returned normally: ${pickedFile.path}');
+      }
 
-      if (fileSize > maxPhotoSizeBytes) {
+      await _processAndUploadFile(pickedFile);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] picker error: $e');
+      }
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        setState(() {
+          _isUploadingPhoto = false;
+          _errorMessage = 'Failed to select or upload image. Please try again.';
+        });
+      }
+    }
+  }
+
+  Future<void> _processAndUploadFile(XFile xFile) async {
+    if (_isUploadingPhoto || PendingProfilePhotoStore.isUploadInProgress) {
+      return;
+    }
+
+    if (PendingProfilePhotoStore.lastUploadedPath == xFile.path) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] Skipping duplicate upload for path: ${xFile.path}');
+      }
+      await PendingProfilePhotoStore.clear();
+      return;
+    }
+
+    final rawFile = File(xFile.path);
+    final fileExists = rawFile.existsSync();
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] XFile path: ${xFile.path}');
+      debugPrint('[ProfilePhotoFlow] whether file exists: $fileExists');
+    }
+
+    if (!fileExists) {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'The captured image file could not be found. Please try again.';
+        });
+      }
+      return;
+    }
+
+    final fileSize = rawFile.lengthSync();
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] file size: $fileSize bytes');
+    }
+
+    if (fileSize == 0) {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'The captured image is empty (0 bytes). Please take another photo.';
+        });
+      }
+      return;
+    }
+
+    const maxPhotoSizeBytes = 5 * 1024 * 1024; // 5 MB
+    if (fileSize > maxPhotoSizeBytes) {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
         setState(() {
           _errorMessage = 'Selected image exceeds the 5 MB limit. Please select a smaller photo.';
         });
-        return;
       }
+      return;
+    }
 
-      // Determine content type safely based on extension
-      final extension = pickedFile.path.split('.').last.toLowerCase();
-      String contentType = 'image/jpeg';
-      if (extension == 'png') {
-        contentType = 'image/png';
-      } else if (extension == 'webp') {
-        contentType = 'image/webp';
-      } else if (extension == 'gif') {
-        contentType = 'image/gif';
+    // Determine extension and MIME type safely
+    final extension = xFile.path.contains('.')
+        ? xFile.path.split('.').last.toLowerCase()
+        : 'jpg';
+    String contentType = 'image/jpeg';
+    if (extension == 'png') {
+      contentType = 'image/png';
+    } else if (extension == 'webp') {
+      contentType = 'image/webp';
+    } else if (extension == 'gif') {
+      contentType = 'image/gif';
+    } else if (extension != 'jpg' && extension != 'jpeg') {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'Unsupported image format ($extension). Please use JPEG, PNG, WebP, or GIF.';
+        });
       }
+      return;
+    }
 
-      // Show local preview immediately before upload starts
-      setState(() {
-        _localImageFile = file;
-        _isUploadingPhoto = true;
-        _errorMessage = '';
-      });
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] MIME/extension: $contentType / .$extension');
+    }
 
+    // Stage file into systemTemp to guard against Android cache cleanup during upload
+    File uploadFile = rawFile;
+    File? tempStagedFile;
+    try {
+      final tempDir = Directory.systemTemp.path;
+      final stagedPath = '$tempDir/profile_photo_staged_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      tempStagedFile = rawFile.copySync(stagedPath);
+      uploadFile = tempStagedFile;
+    } catch (_) {
+      uploadFile = rawFile;
+    }
+
+    setState(() {
+      _localImageFile = uploadFile;
+      _isUploadingPhoto = true;
+      _errorMessage = '';
+    });
+    PendingProfilePhotoStore.markUploadInProgress(true);
+
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] upload starting');
+      debugPrint('[ProfilePhotoFlow] HTTP method: POST');
+      debugPrint('[ProfilePhotoFlow] endpoint path: ${ApiConfig.uploadProfilePhotoEndpoint}');
+      debugPrint('[ProfilePhotoFlow] multipart field name: file');
+    }
+
+    try {
       final updatedProfile = await _profileService.uploadProfilePhoto(
-        filePath: file.path,
-        filename: pickedFile.name,
+        filePath: uploadFile.path,
+        filename: xFile.name.isNotEmpty ? xFile.name : 'profile_photo.$extension',
         contentType: contentType,
       );
+
+      PendingProfilePhotoStore.lastUploadedPath = xFile.path;
+      await PendingProfilePhotoStore.clear();
+
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] response success: 200 OK');
+        debugPrint('[ProfilePhotoFlow] returned profile photo URL: ${updatedProfile.profilePhotoUrl}');
+      }
+
+      // Evict old photo from cache if present
+      final oldResolvedUrl = ApiConfig.resolveImageUrl(_currentProfile.profilePhotoUrl);
+      if (oldResolvedUrl != null) {
+        PaintingBinding.instance.imageCache.evict(NetworkImage(oldResolvedUrl));
+      }
 
       if (!mounted) return;
 
@@ -192,6 +409,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _currentProfile = updatedProfile;
         _isUploadingPhoto = false;
       });
+
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] displayed photo URL/reference: ${_currentProfile.profilePhotoUrl}');
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -201,6 +422,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ),
       );
     } on ApiException catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] response failure: ${e.statusCode} ${e.message}');
+      }
+      await PendingProfilePhotoStore.clear();
       if (mounted) {
         setState(() {
           _localImageFile = null;
@@ -208,13 +433,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _errorMessage = e.message;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] unexpected error during upload: $e');
+      }
+      await PendingProfilePhotoStore.clear();
       if (mounted) {
         setState(() {
           _localImageFile = null;
           _isUploadingPhoto = false;
-          _errorMessage = 'Failed to select or upload image. Please try again.';
+          _errorMessage = 'Could not update profile photo. Please try again.';
         });
+      }
+    } finally {
+      PendingProfilePhotoStore.markUploadInProgress(false);
+      if (tempStagedFile != null && tempStagedFile.existsSync()) {
+        try {
+          tempStagedFile.deleteSync();
+        } catch (_) {}
       }
     }
   }

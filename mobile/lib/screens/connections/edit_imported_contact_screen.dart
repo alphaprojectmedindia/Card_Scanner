@@ -229,6 +229,7 @@ class _EditImportedContactScreenState extends State<EditImportedContactScreen> {
             // Phone Numbers Editor
             BusinessCardPhoneEditor(
               initialPhones: _phones,
+              showTypeSelector: true,
               onChanged: (updatedPhones) {
                 setState(() {
                   _phones = updatedPhones;
@@ -240,6 +241,7 @@ class _EditImportedContactScreenState extends State<EditImportedContactScreen> {
             // Email Addresses Editor
             BusinessCardEmailEditor(
               initialEmails: _emails,
+              showTypeSelector: true,
               onChanged: (updatedEmails) {
                 setState(() {
                   _emails = updatedEmails;

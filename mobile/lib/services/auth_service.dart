@@ -28,8 +28,19 @@ class AuthService {
       requiresAuth: false,
     );
 
-    final authResponse = AuthResponse.fromJson(response as Map<String, dynamic>);
-    await _storageService.saveAuthToken(authResponse.token);
+    final authResponse =
+        AuthResponse.fromJson(response as Map<String, dynamic>);
+    if (authResponse.refreshToken.isNotEmpty) {
+      await _storageService.saveAuthTokens(
+        accessToken: authResponse.accessToken,
+        refreshToken: authResponse.refreshToken,
+        accessTokenExpiresAt: authResponse.accessTokenExpiresAt,
+        refreshTokenExpiresAt: authResponse.refreshTokenExpiresAt,
+      );
+    } else {
+      await _storageService.saveAuthToken(authResponse.token);
+    }
+
     await _storageService.saveUserInfo(
       userId: authResponse.userId,
       email: authResponse.email,
@@ -51,8 +62,19 @@ class AuthService {
       requiresAuth: false,
     );
 
-    final authResponse = AuthResponse.fromJson(response as Map<String, dynamic>);
-    await _storageService.saveAuthToken(authResponse.token);
+    final authResponse =
+        AuthResponse.fromJson(response as Map<String, dynamic>);
+    if (authResponse.refreshToken.isNotEmpty) {
+      await _storageService.saveAuthTokens(
+        accessToken: authResponse.accessToken,
+        refreshToken: authResponse.refreshToken,
+        accessTokenExpiresAt: authResponse.accessTokenExpiresAt,
+        refreshTokenExpiresAt: authResponse.refreshTokenExpiresAt,
+      );
+    } else {
+      await _storageService.saveAuthToken(authResponse.token);
+    }
+
     await _storageService.saveUserInfo(
       userId: authResponse.userId,
       email: authResponse.email,
@@ -62,10 +84,27 @@ class AuthService {
   }
 
   Future<void> logout() async {
-    await _storageService.clearAuth();
+    try {
+      final refreshToken = await _storageService.getRefreshToken();
+      if (refreshToken != null && refreshToken.isNotEmpty) {
+        await _apiClient.post(
+          ApiConfig.logoutEndpoint,
+          body: {'refreshToken': refreshToken},
+          requiresAuth: false,
+        );
+      }
+    } catch (_) {
+      // Local logout MUST still succeed if phone is offline or server unreachable
+    } finally {
+      await _storageService.clearAuth();
+    }
   }
 
   Future<bool> hasStoredToken() async {
     return await _storageService.hasToken();
+  }
+
+  Future<bool> refreshToken() async {
+    return await _apiClient.refreshTokens();
   }
 }

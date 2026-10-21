@@ -71,6 +71,7 @@ class MockTestCommunicationService implements IContactCommunicationService {
   Future<bool> openWhatsApp({
     required String phone,
     required String message,
+    String? linkUrl,
   }) async {
     whatsAppCalled = true;
     lastWhatsAppPhone = phone;

@@ -26,6 +26,7 @@ class MockCommunicationService implements IContactCommunicationService {
   Future<bool> openWhatsApp({
     required String phone,
     required String message,
+    String? linkUrl,
   }) async {
     openWhatsAppCalled = true;
     lastWhatsAppPhone = phone;

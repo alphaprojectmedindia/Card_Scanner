@@ -198,6 +198,7 @@ void main() {
       expect(find.text('Quick Actions'), findsOneWidget);
       expect(find.text('Scan Card'), findsOneWidget);
       expect(find.text('My Digital Card'), findsOneWidget);
+      expect(find.text('QR Generator'), findsOneWidget);
       expect(find.text('Manage Contacts'), findsOneWidget);
       expect(find.text('My Connections'), findsOneWidget);
       expect(find.text('My Profile'), findsOneWidget);

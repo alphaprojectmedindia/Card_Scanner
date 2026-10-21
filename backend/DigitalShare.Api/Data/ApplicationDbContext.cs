@@ -19,6 +19,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<AvailabilitySettings> AvailabilitySettings => Set<AvailabilitySettings>();
     public DbSet<AvailabilitySlot> AvailabilitySlots => Set<AvailabilitySlot>();
     public DbSet<MeetingRequest> MeetingRequests => Set<MeetingRequest>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -191,6 +192,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(m => m.RecipientUserId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<RefreshToken>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+            entity.HasIndex(r => r.TokenHash).IsUnique();
+            entity.HasIndex(r => r.UserId);
+
+            entity.Property(r => r.UserId).IsRequired();
+            entity.Property(r => r.TokenHash).IsRequired().HasMaxLength(128);
+            entity.Property(r => r.CreatedAtUtc).IsRequired();
+            entity.Property(r => r.ExpiresAtUtc).IsRequired();
+            entity.Property(r => r.CreatedByIp).HasMaxLength(50);
+            entity.Property(r => r.RevokedByIp).HasMaxLength(50);
+
+            entity.HasOne(r => r.User)
+                .WithMany()
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

@@ -4,6 +4,7 @@ abstract class IContactCommunicationService {
   Future<bool> openWhatsApp({
     required String phone,
     required String message,
+    String? linkUrl,
   });
 
   Future<bool> openEmail({
@@ -97,8 +98,16 @@ class ContactCommunicationService implements IContactCommunicationService {
     required String message,
   }) {
     final sanitizedPhone = sanitizeForWhatsApp(phone);
-    final encodedMessage = Uri.encodeComponent(message);
-    return 'whatsapp://send?phone=$sanitizedPhone&text=$encodedMessage';
+    final queryParts = <String>[];
+    if (sanitizedPhone.isNotEmpty) {
+      queryParts.add('phone=$sanitizedPhone');
+    }
+    if (message.isNotEmpty) {
+      queryParts.add('text=${Uri.encodeComponent(message)}');
+    }
+    return queryParts.isNotEmpty
+        ? 'whatsapp://send?${queryParts.join('&')}'
+        : 'whatsapp://send';
   }
 
   /// Constructs a universal WhatsApp direct-chat link (`https://wa.me/.../?text=...`).
@@ -107,47 +116,132 @@ class ContactCommunicationService implements IContactCommunicationService {
     required String message,
   }) {
     final sanitizedPhone = sanitizeForWhatsApp(phone);
-    final encodedMessage = Uri.encodeComponent(message);
-    return 'https://wa.me/$sanitizedPhone?text=$encodedMessage';
+    final encodedMessage = message.isNotEmpty ? Uri.encodeComponent(message) : '';
+    if (sanitizedPhone.isNotEmpty) {
+      return encodedMessage.isNotEmpty
+          ? 'https://wa.me/$sanitizedPhone?text=$encodedMessage'
+          : 'https://wa.me/$sanitizedPhone';
+    } else if (encodedMessage.isNotEmpty) {
+      return 'https://wa.me/?text=$encodedMessage';
+    }
+    return 'https://wa.me/';
   }
 
   @override
   Future<bool> openWhatsApp({
     required String phone,
     required String message,
+    String? linkUrl,
   }) async {
     try {
+      // 1. If an original scanned linkUrl was provided, respect it and prioritize safe HTTPS
+      if (linkUrl != null && linkUrl.trim().isNotEmpty) {
+        final trimmedUrl = linkUrl.trim();
+        final lowerUrl = trimmedUrl.toLowerCase();
+
+        // 1A. HTTPS / HTTP WhatsApp link (e.g. wa.me/... or api.whatsapp.com/...)
+        // Prefer preserving and launching that safe HTTPS URI directly.
+        if (lowerUrl.startsWith('https://') || lowerUrl.startsWith('http://')) {
+          final uri = Uri.tryParse(trimmedUrl);
+          if (uri != null) {
+            final host = uri.host.toLowerCase();
+            if (host == 'wa.me' || host == 'www.wa.me' || host == 'api.whatsapp.com') {
+              try {
+                // Avoid relying exclusively on canLaunchUrl() before launching safe HTTPS
+                // links because package visibility restrictions on Android 11+ can cause
+                // false negatives.
+                final launched = await launchUrl(
+                  uri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (launched) return true;
+              } catch (_) {
+                // Fall through to fallback attempt below
+              }
+            }
+          }
+        }
+
+        // 1B. Genuine native whatsapp:// link
+        if (lowerUrl.startsWith('whatsapp://')) {
+          final nativeUri = Uri.tryParse(trimmedUrl);
+          if (nativeUri != null && nativeUri.scheme.toLowerCase() == 'whatsapp') {
+            try {
+              if (await canLaunchUrl(nativeUri)) {
+                final launched = await launchUrl(
+                  nativeUri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (launched) return true;
+              }
+            } catch (_) {
+              // Native launch failed, fall through to safe HTTPS fallback
+            }
+
+            // Fallback for native link: construct equivalent https://wa.me/... fallback
+            final fallbackUrl = buildWhatsAppUniversalUriString(
+              phone: phone,
+              message: message,
+            );
+            final fallbackUri = Uri.tryParse(fallbackUrl);
+            if (fallbackUri != null &&
+                (fallbackUri.pathSegments.isNotEmpty || fallbackUri.hasQuery)) {
+              try {
+                final launched = await launchUrl(
+                  fallbackUri,
+                  mode: LaunchMode.externalApplication,
+                );
+                if (launched) return true;
+              } catch (_) {}
+            }
+            return false;
+          }
+        }
+      }
+
+      // 2. Direct composition / Contact card follow-up (no linkUrl provided or fallback)
       final sanitizedPhone = sanitizeForWhatsApp(phone);
-      if (sanitizedPhone.isEmpty) return false;
+      final hasPhone = sanitizedPhone.isNotEmpty;
+      final hasMessage = message.trim().isNotEmpty;
 
-      // 1. Attempt native WhatsApp direct chat scheme if supported
-      final nativeUri = Uri.parse(
-        buildWhatsAppNativeUriString(phone: phone, message: message),
-      );
-      if (await canLaunchUrl(nativeUri)) {
-        final launched = await launchUrl(
-          nativeUri,
-          mode: LaunchMode.externalApplication,
-        );
-        if (launched) return true;
+      if (!hasPhone && !hasMessage) {
+        return false;
       }
 
-      // 2. Direct universal link wa.me/<recipient>?text=<message>
-      final universalUri = Uri.parse(
-        buildWhatsAppUniversalUriString(phone: phone, message: message),
-      );
-      if (await canLaunchUrl(universalUri)) {
-        return await launchUrl(
-          universalUri,
-          mode: LaunchMode.externalApplication,
+      // If phone is provided, attempt native WhatsApp intent first if available
+      if (hasPhone) {
+        final nativeUri = Uri.parse(
+          buildWhatsAppNativeUriString(phone: sanitizedPhone, message: message),
         );
+        try {
+          if (await canLaunchUrl(nativeUri)) {
+            final launched = await launchUrl(
+              nativeUri,
+              mode: LaunchMode.externalApplication,
+            );
+            if (launched) return true;
+          }
+        } catch (_) {}
       }
 
-      // Fallback: direct external application launch attempt on universal URL
-      return await launchUrl(
-        universalUri,
-        mode: LaunchMode.externalApplication,
+      // Universal link https://wa.me/... (handles both recipient chats and message-only shares)
+      final universalUrl = buildWhatsAppUniversalUriString(
+        phone: sanitizedPhone,
+        message: message,
       );
+      final universalUri = Uri.tryParse(universalUrl);
+      if (universalUri != null) {
+        try {
+          return await launchUrl(
+            universalUri,
+            mode: LaunchMode.externalApplication,
+          );
+        } catch (_) {
+          return false;
+        }
+      }
+
+      return false;
     } catch (_) {
       return false;
     }

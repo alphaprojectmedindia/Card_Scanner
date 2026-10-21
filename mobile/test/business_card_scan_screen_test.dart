@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:digital_share/models/ocr_side_result.dart';
 import 'package:digital_share/screens/scan/business_card_review_screen.dart';
 import 'package:digital_share/screens/scan/business_card_scan_screen.dart';
 import 'package:digital_share/services/business_card_ocr_service.dart';
+import 'package:digital_share/services/pending_card_capture_store.dart';
 
 class FakeImagePicker extends ImagePicker {
   XFile? fileToReturn;
   ImageSource? lastSource;
+  LostDataResponse lostDataToReturn = LostDataResponse.empty();
 
   @override
   Future<XFile?> pickImage({
@@ -21,22 +24,53 @@ class FakeImagePicker extends ImagePicker {
     lastSource = source;
     return fileToReturn;
   }
+
+  @override
+  Future<LostDataResponse> retrieveLostData() async {
+    return lostDataToReturn;
+  }
 }
 
 class FakeOcrService implements IBusinessCardOcrService {
   String returnText;
+  String? returnBackText;
 
-  FakeOcrService({this.returnText = ''});
+  FakeOcrService({this.returnText = '', this.returnBackText});
 
   @override
   Future<String> recognizeTextFromPath(String imagePath) async {
     return returnText;
   }
+
+  @override
+  Future<OcrSideResult> processCardSide({
+    required String imagePath,
+    required CardSide side,
+    String? source,
+  }) async {
+    final text = side == CardSide.front
+        ? returnText
+        : (returnBackText ?? returnText);
+    return OcrSideResult.fromText(
+      side: side,
+      imagePath: imagePath,
+      rawText: text,
+    );
+  }
 }
 
 void main() {
+  setUp(() {
+    PendingCardCaptureStore.resetForTesting();
+  });
+
+  tearDown(() {
+    PendingCardCaptureStore.resetForTesting();
+  });
+
   group('BusinessCardScanScreen Widget Tests', () {
-    testWidgets('Renders two clear choices: Digital Share QR and Physical Business Card',
+    testWidgets(
+        'Renders two clear choices: Digital Share QR and Physical Business Card',
         (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
@@ -45,11 +79,13 @@ void main() {
       );
 
       expect(find.text('Choose Scan Mode'), findsOneWidget);
-      expect(find.byKey(const Key('scan_digital_share_qr_button')), findsOneWidget);
+      expect(
+          find.byKey(const Key('scan_digital_share_qr_button')), findsOneWidget);
       expect(find.byKey(const Key('scan_physical_card_button')), findsOneWidget);
     });
 
-    testWidgets('Tapping Scan Physical Business Card reveals Take Photo and Gallery choices',
+    testWidgets(
+        'Tapping Scan Physical Business Card reveals Take Photo and Gallery choices',
         (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
@@ -61,10 +97,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('inline_take_photo_button')), findsOneWidget);
-      expect(find.byKey(const Key('inline_choose_gallery_button')), findsOneWidget);
+      expect(
+          find.byKey(const Key('inline_choose_gallery_button')), findsOneWidget);
     });
 
-    testWidgets('Handles user cancelling image selection gracefully', (tester) async {
+    testWidgets('Handles user cancelling image selection gracefully',
+        (tester) async {
       final fakePicker = FakeImagePicker()..fileToReturn = null;
       final fakeOcr = FakeOcrService();
 
@@ -80,6 +118,7 @@ void main() {
       await tester.tap(find.byKey(const Key('scan_physical_card_button')));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.byKey(const Key('inline_take_photo_button')));
       await tester.tap(find.byKey(const Key('inline_take_photo_button')));
       await tester.pumpAndSettle();
 
@@ -107,14 +146,23 @@ void main() {
       await tester.tap(find.byKey(const Key('scan_physical_card_button')));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.byKey(const Key('inline_choose_gallery_button')));
       await tester.tap(find.byKey(const Key('inline_choose_gallery_button')));
       await tester.pumpAndSettle();
 
+      // Front card is now staged; user initiates scanning
+      expect(find.text('FRONT SIDE'), findsOneWidget);
+      expect(find.byKey(const Key('scan_details_button')), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const Key('scan_details_button')));
+      await tester.tap(find.byKey(const Key('scan_details_button')));
+      await tester.pumpAndSettle();
+
       expect(find.text('No Text Detected'), findsOneWidget);
-      expect(find.text('Try Again'), findsOneWidget);
     });
 
-    testWidgets('Navigates to BusinessCardReviewScreen when OCR detects card details',
+    testWidgets(
+        'Navigates to BusinessCardReviewScreen when OCR detects card details',
         (tester) async {
       final fakePicker = FakeImagePicker()
         ..fileToReturn = XFile('test/dummy_card.png');
@@ -140,7 +188,16 @@ Email: rahul@abctech.com
       await tester.tap(find.byKey(const Key('scan_physical_card_button')));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.byKey(const Key('inline_take_photo_button')));
       await tester.tap(find.byKey(const Key('inline_take_photo_button')));
+      await tester.pumpAndSettle();
+
+      // Front card is staged with preview and dynamic button
+      expect(find.text('FRONT SIDE'), findsOneWidget);
+      expect(find.text('Scan Details (1 Side)'), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const Key('scan_details_button')));
+      await tester.tap(find.byKey(const Key('scan_details_button')));
       await tester.pumpAndSettle();
 
       expect(find.byType(BusinessCardReviewScreen), findsOneWidget);

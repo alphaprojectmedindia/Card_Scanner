@@ -4,11 +4,13 @@ import '../models/business_card_email.dart';
 class BusinessCardEmailEditor extends StatefulWidget {
   final List<BusinessCardEmail> initialEmails;
   final ValueChanged<List<BusinessCardEmail>> onChanged;
+  final bool showTypeSelector;
 
   const BusinessCardEmailEditor({
     super.key,
     required this.initialEmails,
     required this.onChanged,
+    this.showTypeSelector = false,
   });
 
   @override
@@ -83,14 +85,17 @@ class _BusinessCardEmailEditorState extends State<BusinessCardEmailEditor> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'EMAIL ADDRESSES',
-              style: theme.textTheme.labelMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.1,
-                color: theme.colorScheme.primary,
+            Expanded(
+              child: Text(
+                'EMAIL ADDRESSES',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.1,
+                  color: theme.colorScheme.primary,
+                ),
               ),
             ),
+            const SizedBox(width: 8),
             Text(
               '${_entries.length} detected',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -121,45 +126,47 @@ class _BusinessCardEmailEditorState extends State<BusinessCardEmailEditor> {
             key: item.key,
             padding: const EdgeInsets.only(bottom: 12),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Label Dropdown
-                SizedBox(
-                  width: 110,
-                  child: DropdownButtonFormField<String?>(
-                    isExpanded: true,
-                    isDense: true,
-                    initialValue: availableLabels.contains(item.label) ? item.label : null,
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      labelText: 'Type',
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Unset', style: TextStyle(fontSize: 12)),
-                      ),
-                      ...availableLabels.map(
-                        (l) => DropdownMenuItem<String?>(
-                          value: l,
-                          child: Text(l, style: const TextStyle(fontSize: 12)),
+                // Optional Label Dropdown
+                if (widget.showTypeSelector) ...[
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String?>(
+                      isExpanded: true,
+                      isDense: true,
+                      initialValue: availableLabels.contains(item.label) ? item.label : null,
+                      decoration: InputDecoration(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
                         ),
+                        labelText: 'Type',
                       ),
-                    ],
-                    onChanged: (newLabel) {
-                      setState(() {
-                        item.label = newLabel;
-                      });
-                      _notifyParent();
-                    },
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Unset', style: TextStyle(fontSize: 12)),
+                        ),
+                        ...availableLabels.map(
+                          (l) => DropdownMenuItem<String?>(
+                            value: l,
+                            child: Text(l, style: const TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      ],
+                      onChanged: (newLabel) {
+                        setState(() {
+                          item.label = newLabel;
+                        });
+                        _notifyParent();
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
+                  const SizedBox(width: 8),
+                ],
 
-                // Email Text Field
+                // Email Text Field using nearly full available width
                 Expanded(
                   child: TextFormField(
                     key: Key('email_field_$index'),
@@ -167,6 +174,7 @@ class _BusinessCardEmailEditorState extends State<BusinessCardEmailEditor> {
                     keyboardType: TextInputType.emailAddress,
                     decoration: InputDecoration(
                       hintText: 'name@example.com',
+                      prefixIcon: const Icon(Icons.email_outlined, size: 20),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),

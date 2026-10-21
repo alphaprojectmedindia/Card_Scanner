@@ -37,6 +37,11 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
   late final TextEditingController _websiteController;
   late final TextEditingController _addressController;
 
+  final FocusNode _jobTitleFocusNode = FocusNode();
+  final FocusNode _companyFocusNode = FocusNode();
+  late bool _showJobTitleField;
+  late bool _showCompanyField;
+
   late List<BusinessCardPhone> _phones;
   late List<BusinessCardEmail> _emails;
 
@@ -51,6 +56,11 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
     _websiteController = TextEditingController(text: widget.cardData.website ?? '');
     _addressController = TextEditingController(text: widget.cardData.address ?? '');
 
+    _showJobTitleField = widget.cardData.jobTitle != null &&
+        widget.cardData.jobTitle!.trim().isNotEmpty;
+    _showCompanyField = widget.cardData.company != null &&
+        widget.cardData.company!.trim().isNotEmpty;
+
     _phones = List<BusinessCardPhone>.from(widget.cardData.phoneNumbers);
     _emails = List<BusinessCardEmail>.from(widget.cardData.emailAddresses);
   }
@@ -62,19 +72,30 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
     _companyController.dispose();
     _websiteController.dispose();
     _addressController.dispose();
+    _jobTitleFocusNode.dispose();
+    _companyFocusNode.dispose();
     super.dispose();
   }
 
   BusinessCardData _buildUpdatedData() {
     return BusinessCardData(
       fullName: _nameController.text.trim().isEmpty ? null : _nameController.text.trim(),
-      jobTitle: _jobTitleController.text.trim().isEmpty ? null : _jobTitleController.text.trim(),
-      company: _companyController.text.trim().isEmpty ? null : _companyController.text.trim(),
+      jobTitle: (!_showJobTitleField || _jobTitleController.text.trim().isEmpty)
+          ? null
+          : _jobTitleController.text.trim(),
+      company: (!_showCompanyField || _companyController.text.trim().isEmpty)
+          ? null
+          : _companyController.text.trim(),
       phoneNumbers: _phones.where((p) => p.number.trim().isNotEmpty).toList(),
       emailAddresses: _emails.where((e) => e.email.trim().isNotEmpty).toList(),
       website: _websiteController.text.trim().isEmpty ? null : _websiteController.text.trim(),
       address: _addressController.text.trim().isEmpty ? null : _addressController.text.trim(),
       rawRecognizedText: widget.cardData.rawRecognizedText,
+      alternativeCandidates: widget.cardData.alternativeCandidates,
+      parsingNotes: widget.cardData.parsingNotes,
+      isDualSided: widget.cardData.isDualSided,
+      frontRawText: widget.cardData.frontRawText,
+      backRawText: widget.cardData.backRawText,
     );
   }
 
@@ -210,6 +231,65 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
     }
   }
 
+  Widget _buildAlternativeChip(
+    BuildContext context, {
+    required String fieldKey,
+    required String alternativeText,
+    required VoidCallback onUse,
+  }) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHigh,
+          borderRadius: AppSpacing.radiusSm,
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withValues(alpha: 0.7),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.flip_to_back_rounded,
+              size: 14,
+              color: theme.colorScheme.secondary,
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                'Alternative detected: $alternativeText',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 10),
+            InkWell(
+              key: Key('use_alternative_$fieldKey'),
+              borderRadius: BorderRadius.circular(4),
+              onTap: onUse,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Text(
+                  'Use',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildSectionHeader(BuildContext context, String title, IconData icon) {
     final theme = Theme.of(context);
     return Padding(
@@ -218,12 +298,14 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
         children: [
           Icon(icon, size: 18, color: theme.colorScheme.primary),
           const SizedBox(width: AppSpacing.xs + 2),
-          Text(
-            title,
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2,
-              color: theme.colorScheme.primary,
+          Expanded(
+            child: Text(
+              title,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.1,
+                color: theme.colorScheme.primary,
+              ),
             ),
           ),
         ],
@@ -257,14 +339,18 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
               child: Row(
                 children: [
                   Icon(
-                    Icons.info_outline_rounded,
+                    widget.cardData.isDualSided
+                        ? Icons.flip_to_back_rounded
+                        : Icons.info_outline_rounded,
                     size: 20,
                     color: theme.colorScheme.primary,
                   ),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(
                     child: Text(
-                      'Please verify and edit the recognized details before confirming.',
+                      widget.cardData.isDualSided
+                          ? 'Dual-sided card recognized (Front + Back). Please verify details.'
+                          : 'Please verify and edit the recognized details before confirming.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurface,
                       ),
@@ -304,36 +390,150 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
                         prefixIcon: Icon(Icons.person_outline_rounded),
                       ),
                     ),
+                    if (widget.cardData.alternativeCandidates['fullName']?.isNotEmpty == true)
+                      ...widget.cardData.alternativeCandidates['fullName']!.map(
+                        (alt) => _buildAlternativeChip(
+                          context,
+                          fieldKey: 'name',
+                          alternativeText: alt,
+                          onUse: () {
+                            setState(() {
+                              _nameController.text = alt;
+                            });
+                          },
+                        ),
+                      ),
                     const SizedBox(height: AppSpacing.md),
 
-                    Text(
-                      'Job Title',
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 6),
-                    TextFormField(
-                      key: const Key('review_job_title_field'),
-                      controller: _jobTitleController,
-                      decoration: const InputDecoration(
-                        hintText: 'e.g. Senior Developer',
-                        prefixIcon: Icon(Icons.badge_outlined),
+                    if (_showJobTitleField) ...[
+                      Text(
+                        'Job Title',
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                       ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        key: const Key('review_job_title_field'),
+                        controller: _jobTitleController,
+                        focusNode: _jobTitleFocusNode,
+                        decoration: const InputDecoration(
+                          hintText: 'Job Title',
+                          prefixIcon: Icon(Icons.badge_outlined),
+                        ),
+                      ),
+                      if (widget.cardData.alternativeCandidates['jobTitle']?.isNotEmpty == true)
+                        ...widget.cardData.alternativeCandidates['jobTitle']!.map(
+                          (alt) => _buildAlternativeChip(
+                            context,
+                            fieldKey: 'job_title',
+                            alternativeText: alt,
+                            onUse: () {
+                              setState(() {
+                                _jobTitleController.text = alt;
+                              });
+                            },
+                          ),
+                        ),
+                      const SizedBox(height: AppSpacing.md),
+                    ] else ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          key: const Key('add_job_title_button'),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('+ Add Job Title'),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _showJobTitleField = true;
+                            });
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              _jobTitleFocusNode.requestFocus();
+                            });
+                          },
+                        ),
+                      ),
+                      if (widget.cardData.alternativeCandidates['jobTitle']?.isNotEmpty == true)
+                        ...widget.cardData.alternativeCandidates['jobTitle']!.map(
+                          (alt) => _buildAlternativeChip(
+                            context,
+                            fieldKey: 'job_title',
+                            alternativeText: alt,
+                            onUse: () {
+                              setState(() {
+                                _showJobTitleField = true;
+                                _jobTitleController.text = alt;
+                              });
+                            },
+                          ),
+                        ),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
 
-                    Text(
-                      'Company',
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 6),
-                    TextFormField(
-                      key: const Key('review_company_field'),
-                      controller: _companyController,
-                      decoration: const InputDecoration(
-                        hintText: 'e.g. ABC Technologies',
-                        prefixIcon: Icon(Icons.business_outlined),
+                    if (_showCompanyField) ...[
+                      Text(
+                        'Company',
+                        style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                       ),
-                    ),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        key: const Key('review_company_field'),
+                        controller: _companyController,
+                        focusNode: _companyFocusNode,
+                        decoration: const InputDecoration(
+                          hintText: 'Company or Organization',
+                          prefixIcon: Icon(Icons.business_outlined),
+                        ),
+                      ),
+                      if (widget.cardData.alternativeCandidates['company']?.isNotEmpty == true)
+                        ...widget.cardData.alternativeCandidates['company']!.map(
+                          (alt) => _buildAlternativeChip(
+                            context,
+                            fieldKey: 'company',
+                            alternativeText: alt,
+                            onUse: () {
+                              setState(() {
+                                _companyController.text = alt;
+                              });
+                            },
+                          ),
+                        ),
+                    ] else ...[
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          key: const Key('add_company_button'),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('+ Add Company'),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _showCompanyField = true;
+                            });
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              _companyFocusNode.requestFocus();
+                            });
+                          },
+                        ),
+                      ),
+                      if (widget.cardData.alternativeCandidates['company']?.isNotEmpty == true)
+                        ...widget.cardData.alternativeCandidates['company']!.map(
+                          (alt) => _buildAlternativeChip(
+                            context,
+                            fieldKey: 'company',
+                            alternativeText: alt,
+                            onUse: () {
+                              setState(() {
+                                _showCompanyField = true;
+                                _companyController.text = alt;
+                              });
+                            },
+                          ),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -406,10 +606,23 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
                       controller: _websiteController,
                       keyboardType: TextInputType.url,
                       decoration: const InputDecoration(
-                        hintText: 'e.g. https://example.com',
+                        hintText: 'https://...',
                         prefixIcon: Icon(Icons.language_rounded),
                       ),
                     ),
+                    if (widget.cardData.alternativeCandidates['website']?.isNotEmpty == true)
+                      ...widget.cardData.alternativeCandidates['website']!.map(
+                        (alt) => _buildAlternativeChip(
+                          context,
+                          fieldKey: 'website',
+                          alternativeText: alt,
+                          onUse: () {
+                            setState(() {
+                              _websiteController.text = alt;
+                            });
+                          },
+                        ),
+                      ),
                     const SizedBox(height: AppSpacing.md),
 
                     Text(
@@ -422,10 +635,23 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
                       controller: _addressController,
                       maxLines: 2,
                       decoration: const InputDecoration(
-                        hintText: 'e.g. Chennai, Tamil Nadu',
+                        hintText: 'Address',
                         prefixIcon: Icon(Icons.location_on_outlined),
                       ),
                     ),
+                    if (widget.cardData.alternativeCandidates['address']?.isNotEmpty == true)
+                      ...widget.cardData.alternativeCandidates['address']!.map(
+                        (alt) => _buildAlternativeChip(
+                          context,
+                          fieldKey: 'address',
+                          alternativeText: alt,
+                          onUse: () {
+                            setState(() {
+                              _addressController.text = alt;
+                            });
+                          },
+                        ),
+                      ),
                   ],
                 ),
               ),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/api_client.dart';
 import '../services/auth_service.dart';
@@ -6,30 +7,51 @@ import 'auth/login_screen.dart';
 import 'home/home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  final AuthService? authService;
+  final ProfileService? profileService;
+  final Duration initialDelay;
+
+  const SplashScreen({
+    super.key,
+    this.authService,
+    this.profileService,
+    this.initialDelay = const Duration(milliseconds: 600),
+  });
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  final AuthService _authService = AuthService();
-  final ProfileService _profileService = ProfileService();
+  late final AuthService _authService;
+  late final ProfileService _profileService;
 
   @override
   void initState() {
     super.initState();
+    _authService = widget.authService ?? AuthService();
+    _profileService = widget.profileService ?? ProfileService();
     _checkAuthentication();
   }
 
   Future<void> _checkAuthentication() async {
     // Add small delay for smooth visual transition
-    await Future.delayed(const Duration(milliseconds: 600));
+    if (widget.initialDelay > Duration.zero) {
+      await Future.delayed(widget.initialDelay);
+    }
 
     if (!mounted) return;
 
+    if (kDebugMode) {
+      debugPrint('[Auth] restore started');
+    }
+
+    bool hasToken = false;
     try {
-      final hasToken = await _authService.hasStoredToken();
+      hasToken = await _authService.hasStoredToken();
+      if (kDebugMode) {
+        debugPrint('[Auth] stored token exists=$hasToken');
+      }
       if (!hasToken) {
         _navigateToLogin();
         return;
@@ -37,16 +59,27 @@ class _SplashScreenState extends State<SplashScreen> {
 
       // Validate session against the backend
       final profile = await _profileService.getMyProfile();
+      if (kDebugMode) {
+        debugPrint('[Auth] validation=valid');
+      }
       if (!mounted) return;
       _navigateToHome(profile);
     } on UnauthorizedException {
+      if (kDebugMode) {
+        debugPrint('[Auth] validation=unauthorized');
+      }
       await _authService.logout();
       if (!mounted) return;
       _navigateToLogin();
     } catch (_) {
-      // If network error or temporary issue during initial load, fallback to login
+      if (kDebugMode) {
+        debugPrint('[Auth] validation=network-error');
+      }
+      // CRITICAL RELIABILITY: A temporary network error, socket exception,
+      // timeout, or 5xx server failure MUST NOT delete the token or kick the user out.
+      // We navigate to Home preserving local auth session.
       if (!mounted) return;
-      _navigateToLogin();
+      _navigateToHome(null);
     }
   }
 

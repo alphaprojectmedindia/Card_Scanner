@@ -8,6 +8,8 @@
 		<string>Digital Share uses your photo library to select profile pictures and business card images.</string>
 		<key>NSContactsUsageDescription</key>
 		<string>Digital Share uses Contacts permission only when you choose to save a shared profile to your phone.</string>
+		<key>NSLocationWhenInUseUsageDescription</key>
+		<string>Digital Share uses your location only when you choose Use Current Location to create a location QR code.</string>
 		<key>CADisableMinimumFrameDurationOnPhone</key>
 		<true/>
 		<key>CFBundleDevelopmentRegion</key>
@@ -32,6 +34,10 @@
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
 		<key>LSRequiresIPhoneOS</key>
 		<true/>
+		<key>LSApplicationQueriesSchemes</key>
+		<array>
+			<string>whatsapp</string>
+		</array>
 		<key>UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>

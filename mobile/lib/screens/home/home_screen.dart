@@ -14,6 +14,9 @@ import '../meetings/meetings_screen.dart';
 import '../profile/digital_card_screen.dart';
 import '../profile/profile_screen.dart';
 import '../scan/business_card_scan_screen.dart';
+import '../scan/create_qr_screen.dart';
+import '../../services/pending_card_capture_store.dart';
+import '../../services/pending_profile_photo_store.dart';
 
 class HomeScreen extends StatefulWidget {
   final UserProfile? initialProfile;
@@ -57,6 +60,41 @@ class _HomeScreenState extends State<HomeScreen> {
       _loadCounts();
     } else {
       _loadDashboardData();
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPendingCardCapture();
+      _checkPendingProfilePhoto();
+    });
+  }
+
+  Future<void> _checkPendingCardCapture() async {
+    if (!mounted) return;
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    final pending = await PendingCardCaptureStore.loadPendingCapture();
+    if (pending != null && mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const BusinessCardScanScreen(),
+        ),
+      ).then((_) => _loadCounts());
+    }
+  }
+
+  Future<void> _checkPendingProfilePhoto() async {
+    if (!mounted) return;
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    final pending = await PendingProfilePhotoStore.loadPendingCapture();
+    if (pending != null && mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ProfileScreen(initialProfile: _profile),
+        ),
+      ).then((modified) {
+        if (modified == true) {
+          _loadDashboardData();
+        }
+      });
     }
   }
 
@@ -195,14 +233,18 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
             DigitalShareLogo(
               size: 28,
             ),
             SizedBox(width: AppSpacing.sm),
-            Text(
-              'Digital Share',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            Flexible(
+              child: Text(
+                'Digital Share',
+                style: TextStyle(fontWeight: FontWeight.bold),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -528,6 +570,93 @@ class _HomeScreenState extends State<HomeScreen> {
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: theme.colorScheme.onSurfaceVariant,
                                   ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+
+                // Primary Action: QR Generator (Universal QR Generator)
+                Card(
+                  key: const Key('home_qr_generator_card'),
+                  elevation: 0,
+                  color: theme.colorScheme.surfaceContainerLow,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: AppSpacing.radiusLg,
+                    side: BorderSide(
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: InkWell(
+                    borderRadius: AppSpacing.radiusLg,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const CreateQrScreen(),
+                        ),
+                      );
+                    },
+                    child: Padding(
+                      padding: AppSpacing.cardPadding,
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.tertiaryContainer,
+                              borderRadius: AppSpacing.radiusMd,
+                            ),
+                            child: Icon(
+                              Icons.qr_code_rounded,
+                              size: 26,
+                              color: theme.colorScheme.onTertiaryContainer,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.lg),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'QR Generator',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Create QR codes for links, Wi-Fi, contacts, location and more',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Create QR',
+                                      style: theme.textTheme.labelMedium?.copyWith(
+                                        color: theme.colorScheme.primary,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.arrow_forward_rounded,
+                                      size: 14,
+                                      color: theme.colorScheme.primary,
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),

@@ -18,6 +18,9 @@ class ApiConfig {
   // Auth endpoints
   static String get registerEndpoint => '$baseUrl/api/auth/register';
   static String get loginEndpoint => '$baseUrl/api/auth/login';
+  static String get refreshEndpoint => '$baseUrl/api/auth/refresh';
+  static String get logoutEndpoint => '$baseUrl/api/auth/logout';
+  static String get logoutAllEndpoint => '$baseUrl/api/auth/logout-all';
 
   // Profile endpoints
   static String get profileMeEndpoint => '$baseUrl/api/profile/me';

@@ -4,11 +4,13 @@ import '../models/business_card_phone.dart';
 class BusinessCardPhoneEditor extends StatefulWidget {
   final List<BusinessCardPhone> initialPhones;
   final ValueChanged<List<BusinessCardPhone>> onChanged;
+  final bool showTypeSelector;
 
   const BusinessCardPhoneEditor({
     super.key,
     required this.initialPhones,
     required this.onChanged,
+    this.showTypeSelector = false,
   });
 
   @override
@@ -86,14 +88,17 @@ class _BusinessCardPhoneEditorState extends State<BusinessCardPhoneEditor> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(
-              'PHONE NUMBERS',
-              style: theme.textTheme.labelMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.1,
-                color: theme.colorScheme.primary,
+            Expanded(
+              child: Text(
+                'PHONE NUMBERS',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.1,
+                  color: theme.colorScheme.primary,
+                ),
               ),
             ),
+            const SizedBox(width: 8),
             Text(
               '${_entries.length} detected',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -124,45 +129,47 @@ class _BusinessCardPhoneEditorState extends State<BusinessCardPhoneEditor> {
             key: item.key,
             padding: const EdgeInsets.only(bottom: 12),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                // Label Dropdown
-                SizedBox(
-                  width: 110,
-                  child: DropdownButtonFormField<String?>(
-                    isExpanded: true,
-                    isDense: true,
-                    initialValue: availableLabels.contains(item.label) ? item.label : null,
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      labelText: 'Type',
-                    ),
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Unset', style: TextStyle(fontSize: 12)),
-                      ),
-                      ...availableLabels.map(
-                        (l) => DropdownMenuItem<String?>(
-                          value: l,
-                          child: Text(l, style: const TextStyle(fontSize: 12)),
+                // Optional Label Dropdown
+                if (widget.showTypeSelector) ...[
+                  SizedBox(
+                    width: 110,
+                    child: DropdownButtonFormField<String?>(
+                      isExpanded: true,
+                      isDense: true,
+                      initialValue: availableLabels.contains(item.label) ? item.label : null,
+                      decoration: InputDecoration(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
                         ),
+                        labelText: 'Type',
                       ),
-                    ],
-                    onChanged: (newLabel) {
-                      setState(() {
-                        item.label = newLabel;
-                      });
-                      _notifyParent();
-                    },
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Unset', style: TextStyle(fontSize: 12)),
+                        ),
+                        ...availableLabels.map(
+                          (l) => DropdownMenuItem<String?>(
+                            value: l,
+                            child: Text(l, style: const TextStyle(fontSize: 12)),
+                          ),
+                        ),
+                      ],
+                      onChanged: (newLabel) {
+                        setState(() {
+                          item.label = newLabel;
+                        });
+                        _notifyParent();
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
+                  const SizedBox(width: 8),
+                ],
 
-                // Phone Number Text Field
+                // Phone Number Text Field using nearly full available width
                 Expanded(
                   child: TextFormField(
                     key: Key('phone_field_$index'),
@@ -170,6 +177,7 @@ class _BusinessCardPhoneEditorState extends State<BusinessCardPhoneEditor> {
                     keyboardType: TextInputType.phone,
                     decoration: InputDecoration(
                       hintText: '+91 98765 43210',
+                      prefixIcon: const Icon(Icons.phone_outlined, size: 20),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),

@@ -1,8 +1,12 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../config/api_config.dart';
 import '../../models/user_profile.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
+import '../../services/pending_profile_photo_store.dart';
 import '../../services/profile_service.dart';
 import '../../theme/app_spacing.dart';
 import '../../theme/theme_controller.dart';
@@ -16,29 +20,300 @@ import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final UserProfile? initialProfile;
+  final ProfileService? profileService;
+  final ImagePicker? imagePicker;
 
-  const ProfileScreen({super.key, this.initialProfile});
+  const ProfileScreen({
+    super.key,
+    this.initialProfile,
+    this.profileService,
+    this.imagePicker,
+  });
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> {
-  final ProfileService _profileService = ProfileService();
+class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserver {
+  late final ProfileService _profileService;
+  late final ImagePicker _imagePicker;
   final AuthService _authService = AuthService();
 
   UserProfile? _profile;
   bool _isLoading = false;
+  bool _isUploadingPhoto = false;
   String _errorMessage = '';
   bool _hasModified = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _profileService = widget.profileService ?? ProfileService();
+    _imagePicker = widget.imagePicker ?? ImagePicker();
+
     if (widget.initialProfile != null) {
       _profile = widget.initialProfile;
     } else {
       _fetchProfile();
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkLostDataAndUpload();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkLostDataAndUpload();
+    }
+  }
+
+  /// Recovers profile photo if Android killed the application while the external
+  /// camera app was active.
+  Future<void> _checkLostDataAndUpload() async {
+    if (_isUploadingPhoto || PendingProfilePhotoStore.isUploadInProgress) {
+      return;
+    }
+
+    final pending = await PendingProfilePhotoStore.loadPendingCapture();
+    if (pending == null) {
+      return;
+    }
+
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] ProfileScreen: lost-data recovery attempted');
+    }
+
+    try {
+      final LostDataResponse response = await _imagePicker.retrieveLostData();
+      if (response.isEmpty) {
+        if (kDebugMode) {
+          debugPrint('[ProfilePhotoFlow] ProfileScreen: lost-data recovery returned empty');
+        }
+        await PendingProfilePhotoStore.clear();
+        return;
+      }
+
+      if (response.exception != null) {
+        if (kDebugMode) {
+          debugPrint('[ProfilePhotoFlow] ProfileScreen: lost-data recovery failed: ${response.exception?.message}');
+        }
+        await PendingProfilePhotoStore.clear();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(response.exception?.message ?? 'Failed to recover captured photo.'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
+        }
+        return;
+      }
+
+      final recoveredFile = response.file ??
+          (response.files != null && response.files!.isNotEmpty ? response.files!.first : null);
+
+      if (recoveredFile == null) {
+        await PendingProfilePhotoStore.clear();
+        return;
+      }
+
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] ProfileScreen: lost-data recovery succeeded: ${recoveredFile.path}');
+      }
+
+      await _processAndUploadFile(recoveredFile);
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] ProfileScreen: lost-data recovery error: $e');
+      }
+      await PendingProfilePhotoStore.clear();
+    }
+  }
+
+  Future<void> _processAndUploadFile(XFile xFile) async {
+    if (_isUploadingPhoto || PendingProfilePhotoStore.isUploadInProgress) {
+      return;
+    }
+
+    if (PendingProfilePhotoStore.lastUploadedPath == xFile.path) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] Skipping duplicate upload for path: ${xFile.path}');
+      }
+      await PendingProfilePhotoStore.clear();
+      return;
+    }
+
+    final rawFile = File(xFile.path);
+    if (!rawFile.existsSync()) {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('The captured image file could not be found. Please try again.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    final fileSize = rawFile.lengthSync();
+    if (fileSize == 0) {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('The captured image is empty (0 bytes). Please take another photo.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    const maxPhotoSizeBytes = 5 * 1024 * 1024; // 5 MB
+    if (fileSize > maxPhotoSizeBytes) {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Selected image exceeds the 5 MB limit. Please select a smaller photo.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    final extension = xFile.path.contains('.')
+        ? xFile.path.split('.').last.toLowerCase()
+        : 'jpg';
+    String contentType = 'image/jpeg';
+    if (extension == 'png') {
+      contentType = 'image/png';
+    } else if (extension == 'webp') {
+      contentType = 'image/webp';
+    } else if (extension == 'gif') {
+      contentType = 'image/gif';
+    } else if (extension != 'jpg' && extension != 'jpeg') {
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unsupported image format ($extension). Please use JPEG, PNG, WebP, or GIF.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    File uploadFile = rawFile;
+    File? tempStagedFile;
+    try {
+      final tempDir = Directory.systemTemp.path;
+      final stagedPath = '$tempDir/profile_photo_staged_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      tempStagedFile = rawFile.copySync(stagedPath);
+      uploadFile = tempStagedFile;
+    } catch (_) {
+      uploadFile = rawFile;
+    }
+
+    setState(() {
+      _isUploadingPhoto = true;
+    });
+    PendingProfilePhotoStore.markUploadInProgress(true);
+
+    if (kDebugMode) {
+      debugPrint('[ProfilePhotoFlow] ProfileScreen: upload starting');
+      debugPrint('[ProfilePhotoFlow] HTTP method: POST');
+      debugPrint('[ProfilePhotoFlow] endpoint path: ${ApiConfig.uploadProfilePhotoEndpoint}');
+      debugPrint('[ProfilePhotoFlow] multipart field name: file');
+    }
+
+    try {
+      final updatedProfile = await _profileService.uploadProfilePhoto(
+        filePath: uploadFile.path,
+        filename: xFile.name.isNotEmpty ? xFile.name : 'profile_photo.$extension',
+        contentType: contentType,
+      );
+
+      PendingProfilePhotoStore.lastUploadedPath = xFile.path;
+      await PendingProfilePhotoStore.clear();
+
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] ProfileScreen: upload success 200 OK');
+        debugPrint('[ProfilePhotoFlow] returned profile photo URL: ${updatedProfile.profilePhotoUrl}');
+      }
+
+      final oldResolvedUrl = ApiConfig.resolveImageUrl(_profile?.profilePhotoUrl);
+      if (oldResolvedUrl != null) {
+        PaintingBinding.instance.imageCache.evict(NetworkImage(oldResolvedUrl));
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _profile = updatedProfile;
+        _hasModified = true;
+        _isUploadingPhoto = false;
+      });
+
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] displayed photo URL/reference: ${_profile?.profilePhotoUrl}');
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profile photo uploaded successfully!'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] ProfileScreen upload failure: ${e.statusCode} ${e.message}');
+      }
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        setState(() {
+          _isUploadingPhoto = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[ProfilePhotoFlow] ProfileScreen unexpected error: $e');
+      }
+      await PendingProfilePhotoStore.clear();
+      if (mounted) {
+        setState(() {
+          _isUploadingPhoto = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Could not update profile photo. Please try again.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
+    } finally {
+      PendingProfilePhotoStore.markUploadInProgress(false);
+      if (tempStagedFile != null && tempStagedFile.existsSync()) {
+        try {
+          tempStagedFile.deleteSync();
+        } catch (_) {}
+      }
     }
   }
 
@@ -261,7 +536,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Center(
                             child: Column(
                               children: [
-                                CircleAvatar(
+                                Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    CircleAvatar(
                                   radius: 48,
                                   backgroundColor: theme.colorScheme.primaryContainer,
                                   backgroundImage: ApiConfig.resolveImageUrl(
@@ -285,6 +563,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         )
                                       : null,
                                 ),
+                                if (_isUploadingPhoto)
+                                  Positioned.fill(
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.black.withValues(alpha: 0.5),
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Center(
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 3,
+                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            if (_isUploadingPhoto) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                'Uploading photo...',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
                                 const SizedBox(height: AppSpacing.md),
                                 Text(
                                   _profile?.displayName ?? 'User Profile',
