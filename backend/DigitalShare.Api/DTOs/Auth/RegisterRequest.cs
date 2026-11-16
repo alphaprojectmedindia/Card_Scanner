@@ -17,4 +17,8 @@ public class RegisterRequest
     [Required(ErrorMessage = "Confirm password is required.")]
     [Compare(nameof(Password), ErrorMessage = "Passwords do not match.")]
     public string ConfirmPassword { get; set; } = string.Empty;
+
+    [Phone(ErrorMessage = "Please provide a valid phone number.")]
+    [MaxLength(30)]
+    public string? PhoneNumber { get; set; }
 }

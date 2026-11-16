@@ -99,7 +99,8 @@ public class AuthService : IAuthService
         var user = new ApplicationUser
         {
             UserName = normalizedEmail,
-            Email = normalizedEmail
+            Email = normalizedEmail,
+            PhoneNumber = !string.IsNullOrWhiteSpace(request.PhoneNumber) ? request.PhoneNumber.Trim() : null
         };
 
         var result = await _userManager.CreateAsync(user, request.Password);
@@ -116,6 +117,7 @@ public class AuthService : IAuthService
             UserId = user.Id,
             ShareId = _shareIdGenerator.GenerateShareId(),
             Email = user.Email!,
+            PhoneNumber = !string.IsNullOrWhiteSpace(request.PhoneNumber) ? request.PhoneNumber.Trim() : null,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         };

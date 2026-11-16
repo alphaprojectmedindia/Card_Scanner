@@ -17,14 +17,20 @@ class AuthService {
     required String email,
     required String password,
     required String confirmPassword,
+    String? phoneNumber,
   }) async {
+    final body = <String, dynamic>{
+      'email': email.trim(),
+      'password': password,
+      'confirmPassword': confirmPassword,
+    };
+    if (phoneNumber != null && phoneNumber.trim().isNotEmpty) {
+      body['phoneNumber'] = phoneNumber.trim();
+    }
+
     final response = await _apiClient.post(
       ApiConfig.registerEndpoint,
-      body: {
-        'email': email.trim(),
-        'password': password,
-        'confirmPassword': confirmPassword,
-      },
+      body: body,
       requiresAuth: false,
     );
 

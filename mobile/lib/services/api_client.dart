@@ -368,7 +368,7 @@ class ApiClient {
       throw UnauthorizedException(
         jsonBody is Map<String, dynamic> && jsonBody['message'] != null
             ? jsonBody['message'].toString()
-            : 'Invalid credentials or session expired.',
+            : 'Invalid email or password, or session expired.',
       );
     }
 
@@ -385,16 +385,43 @@ class ApiClient {
       throw ConflictException(
         jsonBody is Map<String, dynamic> && jsonBody['message'] != null
             ? jsonBody['message'].toString()
-            : 'This profile is already saved.',
+            : 'A conflict occurred. The account or record already exists.',
       );
     }
 
     if (response.statusCode == 404) {
+      String notFoundMessage = 'Requested service endpoint was not found.';
+      if (jsonBody is Map<String, dynamic> && jsonBody['message'] != null) {
+        final serverMsg = jsonBody['message'].toString();
+        if (serverMsg.toLowerCase().contains('application not found') ||
+            serverMsg.toLowerCase() == 'not found') {
+          notFoundMessage =
+              'Unable to reach the Digital Share API server. Please check your network connection or ensure the service is active.';
+        } else {
+          notFoundMessage = serverMsg;
+        }
+      }
+      throw ApiException(
+        notFoundMessage,
+        statusCode: 404,
+      );
+    }
+
+    if (response.statusCode == 502 ||
+        response.statusCode == 503 ||
+        response.statusCode == 504) {
+      throw ApiException(
+        'The server is temporarily unavailable or starting up. Please try again in a few moments.',
+        statusCode: response.statusCode,
+      );
+    }
+
+    if (response.statusCode == 500) {
       throw ApiException(
         jsonBody is Map<String, dynamic> && jsonBody['message'] != null
             ? jsonBody['message'].toString()
-            : 'Requested resource was not found.',
-        statusCode: 404,
+            : 'The server encountered an error processing your request. Please try again later.',
+        statusCode: 500,
       );
     }
 

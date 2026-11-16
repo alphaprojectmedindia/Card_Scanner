@@ -80,7 +80,50 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>
         var secondResponse = await _client.PostAsJsonAsync("/api/auth/register", request);
 
         // Assert
-        Assert.Equal(HttpStatusCode.BadRequest, secondResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, secondResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_WithValidPhoneNumber_ReturnsCreatedAndSavesPhone()
+    {
+        // Arrange
+        var request = new RegisterRequest
+        {
+            Email = $"phoneuser_{Guid.NewGuid()}@example.com",
+            Password = "Password123!",
+            ConfirmPassword = "Password123!",
+            PhoneNumber = "+15551234567"
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/auth/register", request);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+
+        var authResponse = await response.Content.ReadFromJsonAsync<AuthResponse>();
+        Assert.NotNull(authResponse);
+        Assert.NotEmpty(authResponse.Token);
+    }
+
+    [Fact]
+    public async Task Health_ReturnsOk()
+    {
+        // Act
+        var response = await _client.GetAsync("/health");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task HealthReady_ReturnsOkWhenDbConnected()
+    {
+        // Act
+        var response = await _client.GetAsync("/health/ready");
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]

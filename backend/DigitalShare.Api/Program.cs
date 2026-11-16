@@ -257,10 +257,59 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Render and uptime monitoring health check endpoint
+// Render and uptime monitoring health check endpoint (liveness probe)
 app.MapHealthChecks("/health");
 
+// Database readiness check endpoint: verifies PostgreSQL database connectivity and migration synchronization
+app.MapGet("/health/ready", async (ApplicationDbContext db, ILogger<Program> logger) =>
+{
+    try
+    {
+        var canConnect = await db.Database.CanConnectAsync();
+        if (!canConnect)
+        {
+            return Results.Json(new { status = "Unhealthy", error = "Cannot connect to database" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
+        var pendingList = pendingMigrations.ToList();
+        if (pendingList.Count > 0)
+        {
+            logger.LogWarning("Readiness check found {Count} pending migrations: {Migrations}", pendingList.Count, string.Join(", ", pendingList));
+            return Results.Json(new { status = "Unhealthy", error = "Pending database migrations not applied", pending = pendingList }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+
+        return Results.Ok(new { status = "Healthy", database = "Connected", schema = "Synchronized" });
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Readiness probe failed connecting to database.");
+        return Results.Json(new { status = "Unhealthy", error = "Database connection error" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+    }
+});
+
 app.MapControllers();
+
+// Apply pending EF Core migrations automatically on startup in production/container.
+// If migrations fail, log fatal error and fail startup to prevent running with an incomplete/missing schema.
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
+    var dbContext = services.GetRequiredService<ApplicationDbContext>();
+
+    try
+    {
+        logger.LogInformation("Checking and applying pending database migrations...");
+        dbContext.Database.Migrate();
+        logger.LogInformation("Database migrations applied successfully.");
+    }
+    catch (Exception ex)
+    {
+        logger.LogCritical(ex, "FATAL: Database migration failed on application startup. Stopping application to prevent running with an incomplete or missing schema.");
+        throw;
+    }
+}
 
 app.Run();
 
@@ -268,32 +317,36 @@ app.Run();
 public partial class Program
 {
     /// <summary>
-    /// Resolves PostgreSQL connection string from either explicit DefaultConnection or Render/Heroku DATABASE_URL.
+    /// Resolves PostgreSQL connection string from either explicit Render/Heroku DATABASE_URL or ConnectionStrings:DefaultConnection.
+    /// Priority is given to DATABASE_URL so production cloud environment variables override local development appsettings.json.
     /// </summary>
     public static string ResolvePostgreSqlConnectionString(IConfiguration configuration)
     {
-        // 1. Check explicit DefaultConnection
-        var explicitConnection = configuration.GetConnectionString("DefaultConnection");
-        if (!string.IsNullOrWhiteSpace(explicitConnection) &&
-            !explicitConnection.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) &&
-            !explicitConnection.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+        // 1. Priority 1: DATABASE_URL environment variable (Render, Railway, Heroku)
+        var databaseUrl = configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+        if (!string.IsNullOrWhiteSpace(databaseUrl))
         {
-            return explicitConnection;
+            if (databaseUrl.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
+                databaseUrl.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+            {
+                return ConvertPostgreSqlUriToNpgsqlConnectionString(databaseUrl);
+            }
+            return databaseUrl;
         }
 
-        // 2. Check DATABASE_URL or URI-formatted DefaultConnection
-        var rawUrl = !string.IsNullOrWhiteSpace(explicitConnection)
-            ? explicitConnection
-            : configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
-
-        if (!string.IsNullOrWhiteSpace(rawUrl) &&
-            (rawUrl.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
-             rawUrl.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase)))
+        // 2. Priority 2: Explicit ConnectionStrings:DefaultConnection
+        var connectionString = configuration.GetConnectionString("DefaultConnection");
+        if (!string.IsNullOrWhiteSpace(connectionString))
         {
-            return ConvertPostgreSqlUriToNpgsqlConnectionString(rawUrl);
+            if (connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
+                connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+            {
+                return ConvertPostgreSqlUriToNpgsqlConnectionString(connectionString);
+            }
+            return connectionString;
         }
 
-        return explicitConnection ?? string.Empty;
+        return string.Empty;
     }
 
     /// <summary>
@@ -309,6 +362,16 @@ public partial class Program
         var host = uri.Host;
         var port = uri.Port > 0 ? uri.Port : 5432;
 
+        var sslMode = SslMode.Prefer;
+        if (databaseUrl.Contains("sslmode=require", StringComparison.OrdinalIgnoreCase))
+        {
+            sslMode = SslMode.Require;
+        }
+        else if (databaseUrl.Contains("sslmode=disable", StringComparison.OrdinalIgnoreCase))
+        {
+            sslMode = SslMode.Disable;
+        }
+
         var builder = new NpgsqlConnectionStringBuilder
         {
             Host = host,
@@ -316,7 +379,7 @@ public partial class Program
             Database = database,
             Username = username,
             Password = password,
-            SslMode = SslMode.Prefer
+            SslMode = sslMode
         };
 
         return builder.ConnectionString;

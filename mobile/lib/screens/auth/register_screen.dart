@@ -19,6 +19,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _phoneController = TextEditingController();
   final AuthService _authService = AuthService();
 
   bool _isLoading = false;
@@ -29,6 +30,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -47,6 +49,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
         email: _emailController.text,
         password: _passwordController.text,
         confirmPassword: _confirmPasswordController.text,
+        phoneNumber: _phoneController.text.trim().isNotEmpty
+            ? _phoneController.text.trim()
+            : null,
       );
 
       if (!mounted) return;
@@ -165,6 +170,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       }
                       return null;
                     },
+                  ),
+                  const SizedBox(height: 18),
+                  CustomTextField(
+                    controller: _phoneController,
+                    label: 'Phone Number (Optional)',
+                    hint: '+1 (555) 000-0000',
+                    prefixIcon: Icons.phone_outlined,
+                    keyboardType: TextInputType.phone,
                   ),
                   const SizedBox(height: 28),
                   PrimaryButton(

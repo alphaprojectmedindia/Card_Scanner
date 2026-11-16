@@ -26,6 +26,7 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request)
     {
         if (!ModelState.IsValid)
@@ -37,6 +38,11 @@ public class AuthController : ControllerBase
         if (!success)
         {
             var errorList = errors != null ? errors.ToArray() : new[] { "Registration failed." };
+            if (errorList.Any(e => e.Contains("already exists", StringComparison.OrdinalIgnoreCase)))
+            {
+                return Conflict(new ErrorResponse("A user with this email address already exists."));
+            }
+
             return BadRequest(new ErrorResponse("Registration failed.", new Dictionary<string, string[]>
             {
                 { "Errors", errorList }

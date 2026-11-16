@@ -2,7 +2,7 @@ class ApiConfig {
   ApiConfig._();
 
   /// Production backend endpoint on Render
-  static const String _productionBaseUrl = 'https://digital-share-api.onrender.com';
+  static const String _productionBaseUrl = 'https://card-scanner-128g.onrender.com';
 
   /// Falls back to `http://10.0.2.2:5000` for Android emulator compatibility only if
   /// explicitly enabled via `--dart-define=USE_EMULATOR=true`.
