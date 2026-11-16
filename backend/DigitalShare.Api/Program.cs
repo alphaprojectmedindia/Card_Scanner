@@ -33,7 +33,8 @@ var jwtOptions = builder.Configuration
     .Get<JwtOptions>() ?? new JwtOptions();
 
 // 2. Database Context (Supports standard connection strings and Render/Heroku DATABASE_URL URI format)
-var connectionString = ResolvePostgreSqlConnectionString(builder.Configuration);
+var connectionString = ResolvePostgreSqlConnectionString(builder.Configuration, out var dbDiagnostic);
+Console.WriteLine(dbDiagnostic.ToString());
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     options.UseNpgsql(connectionString);
@@ -265,10 +266,15 @@ app.MapGet("/health/ready", async (ApplicationDbContext db, ILogger<Program> log
 {
     try
     {
+        if (!db.Database.IsRelational())
+        {
+            return Results.Text("{\"status\":\"Healthy\",\"database\":\"InMemory\",\"schema\":\"Synchronized\"}", "application/json");
+        }
+
         var canConnect = await db.Database.CanConnectAsync();
         if (!canConnect)
         {
-            return Results.Json(new { status = "Unhealthy", error = "Cannot connect to database" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+            return Results.Text("{\"status\":\"Unhealthy\",\"error\":\"Cannot connect to database\"}", "application/json", statusCode: StatusCodes.Status503ServiceUnavailable);
         }
 
         var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
@@ -276,15 +282,16 @@ app.MapGet("/health/ready", async (ApplicationDbContext db, ILogger<Program> log
         if (pendingList.Count > 0)
         {
             logger.LogWarning("Readiness check found {Count} pending migrations: {Migrations}", pendingList.Count, string.Join(", ", pendingList));
-            return Results.Json(new { status = "Unhealthy", error = "Pending database migrations not applied", pending = pendingList }, statusCode: StatusCodes.Status503ServiceUnavailable);
+            var json = System.Text.Json.JsonSerializer.Serialize(new { status = "Unhealthy", error = "Pending database migrations not applied", pending = pendingList });
+            return Results.Text(json, "application/json", statusCode: StatusCodes.Status503ServiceUnavailable);
         }
 
-        return Results.Ok(new { status = "Healthy", database = "Connected", schema = "Synchronized" });
+        return Results.Text("{\"status\":\"Healthy\",\"database\":\"Connected\",\"schema\":\"Synchronized\"}", "application/json");
     }
     catch (Exception ex)
     {
         logger.LogError(ex, "Readiness probe failed connecting to database.");
-        return Results.Json(new { status = "Unhealthy", error = "Database connection error" }, statusCode: StatusCodes.Status503ServiceUnavailable);
+        return Results.Text("{\"status\":\"Unhealthy\",\"error\":\"Database connection error\"}", "application/json", statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 });
 
@@ -300,9 +307,18 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        logger.LogInformation("Checking and applying pending database migrations...");
-        dbContext.Database.Migrate();
-        logger.LogInformation("Database migrations applied successfully.");
+        logger.LogInformation("Database connection configuration diagnostic: {Diagnostic}", dbDiagnostic.ToString());
+
+        if (dbContext.Database.IsRelational())
+        {
+            logger.LogInformation("Checking and applying pending database migrations...");
+            dbContext.Database.Migrate();
+            logger.LogInformation("Database migrations applied successfully.");
+        }
+        else
+        {
+            logger.LogInformation("Non-relational database provider detected (e.g. In-Memory test provider). Skipping relational migrations.");
+        }
     }
     catch (Exception ex)
     {
@@ -317,71 +333,53 @@ app.Run();
 public partial class Program
 {
     /// <summary>
-    /// Resolves PostgreSQL connection string from either explicit Render/Heroku DATABASE_URL or ConnectionStrings:DefaultConnection.
+    /// Resolves PostgreSQL connection string from either explicit Render/Heroku/Supabase DATABASE_URL or ConnectionStrings:DefaultConnection.
     /// Priority is given to DATABASE_URL so production cloud environment variables override local development appsettings.json.
+    /// Returns safe diagnostics without logging sensitive credentials.
     /// </summary>
     public static string ResolvePostgreSqlConnectionString(IConfiguration configuration)
     {
-        // 1. Priority 1: DATABASE_URL environment variable (Render, Railway, Heroku)
+        return ResolvePostgreSqlConnectionString(configuration, out _);
+    }
+
+    /// <summary>
+    /// Resolves PostgreSQL connection string with diagnostic information.
+    /// </summary>
+    public static string ResolvePostgreSqlConnectionString(IConfiguration configuration, out PostgreSqlConnectionDiagnostic diagnostic)
+    {
+        // 1. Priority 1: DATABASE_URL environment variable (Render, Supabase, Railway, Heroku)
         var databaseUrl = configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
         if (!string.IsNullOrWhiteSpace(databaseUrl))
         {
-            if (databaseUrl.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
-                databaseUrl.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
-            {
-                return ConvertPostgreSqlUriToNpgsqlConnectionString(databaseUrl);
-            }
-            return databaseUrl;
+            return PostgreSqlConnectionParser.ParseToConnectionString(databaseUrl, out diagnostic);
         }
 
         // 2. Priority 2: Explicit ConnectionStrings:DefaultConnection
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         if (!string.IsNullOrWhiteSpace(connectionString))
         {
-            if (connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
-                connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
-            {
-                return ConvertPostgreSqlUriToNpgsqlConnectionString(connectionString);
-            }
-            return connectionString;
+            return PostgreSqlConnectionParser.ParseToConnectionString(connectionString, out diagnostic);
         }
 
+        diagnostic = new PostgreSqlConnectionDiagnostic(
+            Success: false,
+            Scheme: string.Empty,
+            Host: string.Empty,
+            Port: 0,
+            Database: string.Empty,
+            SslMode: string.Empty,
+            HasUsername: false,
+            HasPassword: false,
+            ErrorMessage: "No database connection string configured.");
         return string.Empty;
     }
 
     /// <summary>
-    /// Converts a postgres:// or postgresql:// URI (as supplied by Render/Heroku) into an Npgsql key-value connection string.
+    /// Converts a postgres:// or postgresql:// URI (as supplied by Render/Heroku/Supabase) into an Npgsql key-value connection string.
+    /// Backward-compatible overload.
     /// </summary>
     public static string ConvertPostgreSqlUriToNpgsqlConnectionString(string databaseUrl)
     {
-        var uri = new Uri(databaseUrl);
-        var userInfo = uri.UserInfo.Split(':', 2);
-        var username = Uri.UnescapeDataString(userInfo[0]);
-        var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty;
-        var database = uri.AbsolutePath.TrimStart('/');
-        var host = uri.Host;
-        var port = uri.Port > 0 ? uri.Port : 5432;
-
-        var sslMode = SslMode.Prefer;
-        if (databaseUrl.Contains("sslmode=require", StringComparison.OrdinalIgnoreCase))
-        {
-            sslMode = SslMode.Require;
-        }
-        else if (databaseUrl.Contains("sslmode=disable", StringComparison.OrdinalIgnoreCase))
-        {
-            sslMode = SslMode.Disable;
-        }
-
-        var builder = new NpgsqlConnectionStringBuilder
-        {
-            Host = host,
-            Port = port,
-            Database = database,
-            Username = username,
-            Password = password,
-            SslMode = sslMode
-        };
-
-        return builder.ConnectionString;
+        return PostgreSqlConnectionParser.ParseToConnectionString(databaseUrl, out _);
     }
 }
