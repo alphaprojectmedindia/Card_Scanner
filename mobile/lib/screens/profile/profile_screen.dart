@@ -17,6 +17,8 @@ import '../meetings/meetings_screen.dart';
 import 'availability_settings_screen.dart';
 import 'digital_card_screen.dart';
 import 'edit_profile_screen.dart';
+import 'account_visibility_screen.dart';
+import 'delete_account_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final UserProfile? initialProfile;
@@ -843,6 +845,70 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                                     Navigator.of(context).push(
                                       MaterialPageRoute(
                                         builder: (_) => const MeetingsScreen(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const Divider(height: 1),
+                                ListTile(
+                                  key: const Key('account_visibility_tile'),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.primaryContainer,
+                                      borderRadius: AppSpacing.radiusSm,
+                                    ),
+                                    child: Icon(
+                                      Icons.visibility_outlined,
+                                      color: theme.colorScheme.primary,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'Account Visibility',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  subtitle: const Text('Public vs Private discovery settings'),
+                                  trailing: const Icon(Icons.chevron_right_rounded),
+                                  onTap: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => AccountVisibilityScreen(
+                                          profileService: _profileService,
+                                          initialIsPublic: _profile?.isPublic,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const Divider(height: 1),
+                                ListTile(
+                                  key: const Key('delete_account_tile'),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.errorContainer,
+                                      borderRadius: AppSpacing.radiusSm,
+                                    ),
+                                    child: Icon(
+                                      Icons.delete_forever_outlined,
+                                      color: theme.colorScheme.error,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: Text(
+                                    'Delete Account',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      color: theme.colorScheme.error,
+                                    ),
+                                  ),
+                                  subtitle: const Text('Permanently remove account and data'),
+                                  trailing: const Icon(Icons.chevron_right_rounded),
+                                  onTap: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const DeleteAccountScreen(),
                                       ),
                                     );
                                   },

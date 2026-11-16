@@ -18,6 +18,12 @@ public class ImportedBusinessCard
     [ForeignKey(nameof(OwnerUserId))]
     public virtual ApplicationUser? OwnerUser { get; set; }
 
+    [MaxLength(64)]
+    public string? ClientRequestId { get; set; }
+
+    [MaxLength(64)]
+    public string? RequestPayloadHash { get; set; }
+
     [MaxLength(100)]
     public string? FullName { get; set; }
 
@@ -32,6 +38,13 @@ public class ImportedBusinessCard
 
     [MaxLength(500)]
     public string? Address { get; set; }
+
+    /// <summary>
+    /// Optional private personal remark/nickname/note added by the card owner. Max 2,000 characters.
+    /// Strictly private to the owner user; NEVER shared in public or cross-user responses.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? PersonalRemark { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;

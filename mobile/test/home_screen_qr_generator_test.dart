@@ -7,6 +7,7 @@ import 'package:digital_share/screens/home/home_screen.dart';
 import 'package:digital_share/screens/profile/digital_card_screen.dart';
 import 'package:digital_share/screens/scan/business_card_scan_screen.dart';
 import 'package:digital_share/screens/scan/create_qr_screen.dart';
+import 'package:digital_share/screens/scan/qr_scanner_screen.dart';
 import 'package:digital_share/services/connection_service.dart';
 import 'package:digital_share/services/imported_contact_service.dart';
 import 'package:digital_share/services/pending_card_capture_store.dart';
@@ -102,15 +103,18 @@ void main() {
       expect(find.text('Create QR'), findsOneWidget);
 
       // Verify layout geometry order:
-      // Scan Card -> My Digital Card -> QR Generator -> Meetings
-      final scanCardCenter = tester.getCenter(find.text('Scan Card'));
+      // Business Card Scanner -> Universal QR Scanner -> My Digital Card -> QR Generator -> Meetings
+      final bCardCenter = tester.getCenter(find.text('Business Card Scanner'));
+      final qrScanCenter = tester.getCenter(find.text('Universal QR Scanner'));
       final digitalCardCenter = tester.getCenter(find.text('My Digital Card'));
       final qrGenCenter = tester.getCenter(find.text('QR Generator'));
       final meetingsCenter = tester.getCenter(find.text('Meetings'));
 
       // Vertical ordering strictly verified:
-      expect(scanCardCenter.dy < digitalCardCenter.dy, isTrue,
-          reason: 'Scan Card must be above My Digital Card');
+      expect(bCardCenter.dy < qrScanCenter.dy, isTrue,
+          reason: 'Business Card Scanner must be above Universal QR Scanner');
+      expect(qrScanCenter.dy < digitalCardCenter.dy, isTrue,
+          reason: 'Universal QR Scanner must be above My Digital Card');
       expect(digitalCardCenter.dy < qrGenCenter.dy, isTrue,
           reason: 'QR Generator must be DIRECTLY BELOW My Digital Card');
       expect(qrGenCenter.dy < meetingsCenter.dy, isTrue,
@@ -169,18 +173,35 @@ void main() {
       expect(find.byType(HomeScreen), findsOneWidget);
     });
 
-    // 6. Universal QR Scanner remains unchanged
-    testWidgets('6. Universal QR Scanner action on Home remains unchanged', (tester) async {
+    // 6. Business Card Scanner opens BusinessCardScanScreen
+    testWidgets('6. Business Card Scanner action on Home opens BusinessCardScanScreen', (tester) async {
       setPhoneViewport(tester);
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
-      expect(find.text('Scan Card'), findsOneWidget);
-      await tester.tap(find.text('Scan Card'));
+      expect(find.text('Business Card Scanner'), findsOneWidget);
+      expect(find.text('Scan a physical business card'), findsOneWidget);
+      await tester.tap(find.text('Business Card Scanner'));
       await tester.pumpAndSettle();
 
       expect(find.byType(BusinessCardScanScreen), findsOneWidget);
       expect(find.text('Choose Scan Mode'), findsOneWidget);
+    });
+
+    // 6b. Universal QR Scanner opens QrScannerScreen directly
+    testWidgets('6b. Universal QR Scanner action on Home opens QrScannerScreen directly', (tester) async {
+      setPhoneViewport(tester);
+      await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Universal QR Scanner'), findsOneWidget);
+      expect(find.text('Scan any QR code'), findsOneWidget);
+      await tester.tap(find.text('Universal QR Scanner'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(QrScannerScreen), findsOneWidget);
+      expect(find.text('Universal QR Scanner'), findsOneWidget);
+      expect(find.text('Point your camera at any QR code'), findsOneWidget);
     });
 
     // 7. All existing QR Generator types remain available

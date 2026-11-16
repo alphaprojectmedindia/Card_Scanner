@@ -51,4 +51,56 @@ public class JwtTokenGeneratorTests
         Assert.NotNull(emailClaim);
         Assert.Equal(user.Email, emailClaim.Value);
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void GenerateToken_WithMissingOrEmptySecretKey_ThrowsInvalidOperationException(string missingKey)
+    {
+        // Arrange
+        var jwtOptions = Options.Create(new JwtOptions
+        {
+            Issuer = "DigitalShare.Test",
+            Audience = "DigitalShare.Audience",
+            SecretKey = missingKey
+        });
+
+        var generator = new JwtTokenGenerator(jwtOptions);
+        var user = new ApplicationUser
+        {
+            Id = Guid.NewGuid().ToString(),
+            Email = "testuser@example.com",
+            UserName = "testuser@example.com"
+        };
+
+        // Act & Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => generator.GenerateToken(user));
+        Assert.Contains("not configured", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("short-key")]
+    [InlineData("1234567890123456789012345678901")] // 31 characters
+    public void GenerateToken_WithShortSecretKey_ThrowsInvalidOperationException(string shortKey)
+    {
+        // Arrange
+        var jwtOptions = Options.Create(new JwtOptions
+        {
+            Issuer = "DigitalShare.Test",
+            Audience = "DigitalShare.Audience",
+            SecretKey = shortKey
+        });
+
+        var generator = new JwtTokenGenerator(jwtOptions);
+        var user = new ApplicationUser
+        {
+            Id = Guid.NewGuid().ToString(),
+            Email = "testuser@example.com",
+            UserName = "testuser@example.com"
+        };
+
+        // Act & Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => generator.GenerateToken(user));
+        Assert.Contains("at least 256 bits", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -1,10 +1,16 @@
 class ApiConfig {
   ApiConfig._();
 
-  /// Reads base URL from `--dart-define=API_BASE_URL=...` at compile/run time.
-  /// Falls back to `http://10.0.2.2:5000` for Android emulator compatibility or `http://localhost:5000`.
-  static const String _defaultBaseUrl = 'http://10.0.2.2:5000';
+  /// Production backend endpoint on Render
+  static const String _productionBaseUrl = 'https://digital-share-api.onrender.com';
 
+  /// Falls back to `http://10.0.2.2:5000` for Android emulator compatibility only if
+  /// explicitly enabled via `--dart-define=USE_EMULATOR=true`.
+  static const String _defaultDevBaseUrl = 'http://10.0.2.2:5000';
+
+  /// Reads base URL from `--dart-define=API_BASE_URL=...` at compile/run time.
+  /// Defaults to Render production URL for both debug and release builds,
+  /// unless `--dart-define=USE_EMULATOR=true` is explicitly passed.
   static String get baseUrl {
     const fromEnv = String.fromEnvironment('API_BASE_URL');
     if (fromEnv.isNotEmpty) {
@@ -12,7 +18,11 @@ class ApiConfig {
           ? fromEnv.substring(0, fromEnv.length - 1)
           : fromEnv;
     }
-    return _defaultBaseUrl;
+    const useEmulator = bool.fromEnvironment('USE_EMULATOR', defaultValue: false);
+    if (useEmulator) {
+      return _defaultDevBaseUrl;
+    }
+    return _productionBaseUrl;
   }
 
   // Auth endpoints
@@ -21,10 +31,13 @@ class ApiConfig {
   static String get refreshEndpoint => '$baseUrl/api/auth/refresh';
   static String get logoutEndpoint => '$baseUrl/api/auth/logout';
   static String get logoutAllEndpoint => '$baseUrl/api/auth/logout-all';
+  static String get deleteAccountEndpoint => '$baseUrl/api/auth/delete-account';
 
   // Profile endpoints
   static String get profileMeEndpoint => '$baseUrl/api/profile/me';
   static String get uploadProfilePhotoEndpoint => '$baseUrl/api/profile/photo';
+  static String get profileVisibilityEndpoint => '$baseUrl/api/profile/visibility';
+  static String get profileSearchEndpoint => '$baseUrl/api/profile/search';
 
   /// Resolves an image path or URL. If the image is stored locally on the server
   /// with a relative path (e.g. `/uploads/profile-photos/...`), it resolves it against [baseUrl].
@@ -55,6 +68,11 @@ class ApiConfig {
   static String get importedContactsEndpoint => '$baseUrl/api/imported-contacts';
   static String get checkDuplicateImportedContactEndpoint => '$baseUrl/api/imported-contacts/check-duplicate';
   static String importedContactByIdEndpoint(String id) => '$baseUrl/api/imported-contacts/$id';
+  static String importedContactRemarkEndpoint(String id) => '$baseUrl/api/imported-contacts/$id/remark';
+
+  // Business Card Analysis endpoints
+  static String get analyzeBusinessCardEndpoint => '$baseUrl/api/business-cards/analyze';
+  static String get uploadBusinessCardImageEndpoint => '$baseUrl/api/business-cards/images';
 
   // Availability endpoints
   static String get availabilityMeEndpoint => '$baseUrl/api/availability/me';

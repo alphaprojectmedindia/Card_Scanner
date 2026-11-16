@@ -24,6 +24,7 @@ class MockTestOcrEngine implements OcrEngine {
   final double confidence;
   final Duration latency;
   final bool shouldFail;
+  int invocationCount = 0;
 
   MockTestOcrEngine({
     required this.name,
@@ -35,6 +36,7 @@ class MockTestOcrEngine implements OcrEngine {
 
   @override
   Future<OcrEngineResult> recognize(String imagePath) async {
+    invocationCount++;
     if (shouldFail) {
       return OcrEngineResult.failure(
         engineName: name,
@@ -143,7 +145,7 @@ void main() {
       expect(detection.corners, isNotNull);
       expect(quality.isTooSmall, isFalse);
       expect(quality.isTooClose, isFalse);
-      expect(quality.guidanceMessage, equals('Ready to scan'));
+      expect(quality.guidanceMessage, equals('Card aligned'));
     });
 
     test('2. Card too small triggers "Move closer" guidance', () {
@@ -161,7 +163,7 @@ void main() {
       );
 
       expect(quality.isTooSmall, isTrue);
-      expect(quality.guidanceMessage, equals('Move closer'));
+      expect(quality.guidanceMessage, equals('Move closer to the card'));
     });
 
     test('3. Card partially outside region triggers clipping warning', () {
@@ -178,7 +180,7 @@ void main() {
       );
 
       expect(quality.isClipping, isTrue);
-      expect(quality.guidanceMessage, equals('Keep the entire card visible'));
+      expect(quality.guidanceMessage, equals('Keep the full card inside the frame'));
     });
 
     test('4. Dark capture detects extreme darkness and triggers lighting guidance', () {
@@ -195,7 +197,7 @@ void main() {
       );
 
       expect(quality.isExtremelyDark, isTrue);
-      expect(quality.guidanceMessage, equals('Too dark — improve lighting'));
+      expect(quality.guidanceMessage, equals('Move to better lighting'));
     });
 
     test('5. Overexposed capture detects glare and triggers tilt guidance', () {
@@ -212,7 +214,7 @@ void main() {
       );
 
       expect(quality.isExtremelyOverexposed, isTrue);
-      expect(quality.guidanceMessage, equals('Possible glare — tilt card slightly'));
+      expect(quality.guidanceMessage, equals('Reduce glare'));
     });
 
     test('6. Blurred capture detects low edge variance and triggers hold steady guidance', () {
@@ -229,7 +231,7 @@ void main() {
       );
 
       expect(quality.isBlurry, isTrue);
-      expect(quality.guidanceMessage, equals('Hold steady'));
+      expect(quality.guidanceMessage, equals('Hold the card steady'));
     });
 
     test('7. Perspective/skewed card detects non-parallelism', () {
@@ -693,7 +695,7 @@ void main() {
       expect(res.emails.first.value, equals('kavita@domain.com')); // ML Kit
     });
 
-    test('36. All critical fields already good -> no unnecessary Paddle fallback', () async {
+    test('36. Dual engine execution runs both engines and arbitrates at field level', () async {
       final primary = MockTestOcrEngine(
         name: 'Mock ML Kit',
         linesToReturn: [
@@ -721,8 +723,10 @@ void main() {
         side: CardSide.front,
       );
 
-      expect(result.fallbackInvoked, isFalse);
-      expect(result.engineName, equals('Mock ML Kit'));
+      expect(primary.invocationCount, 1);
+      expect(secondary.invocationCount, 1);
+      expect(result.fallbackInvoked, isTrue);
+      expect(result.engineName, contains('Hybrid Field-Resolved'));
     });
 
     test('37. All critical fields weak -> fallback triggered', () async {

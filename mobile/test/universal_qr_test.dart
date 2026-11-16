@@ -521,9 +521,10 @@ END:VEVENT''';
         ),
       );
 
-      expect(find.text('Scan QR Code'), findsOneWidget);
+      expect(find.text('Universal QR Scanner'), findsOneWidget);
+      expect(find.text('Point your camera at any QR code'), findsOneWidget);
       expect(
-        find.text('Scan Digital Share profiles, websites, Wi-Fi, contacts, locations and more.'),
+        find.text('Supports links, Wi-Fi, contacts, WhatsApp and more.'),
         findsOneWidget,
       );
       expect(find.byKey(const Key('qr_recent_scans_button')), findsOneWidget);

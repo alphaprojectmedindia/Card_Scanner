@@ -15,6 +15,7 @@ import '../profile/digital_card_screen.dart';
 import '../profile/profile_screen.dart';
 import '../scan/business_card_scan_screen.dart';
 import '../scan/create_qr_screen.dart';
+import '../scan/qr_scanner_screen.dart';
 import '../../services/pending_card_capture_store.dart';
 import '../../services/pending_profile_photo_store.dart';
 
@@ -22,12 +23,14 @@ class HomeScreen extends StatefulWidget {
   final UserProfile? initialProfile;
   final ConnectionService? connectionService;
   final ImportedContactService? importedContactService;
+  final ProfileService? profileService;
 
   const HomeScreen({
     super.key,
     this.initialProfile,
     this.connectionService,
     this.importedContactService,
+    this.profileService,
   });
 
   @override
@@ -35,14 +38,14 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final ProfileService _profileService = ProfileService();
+  late final ProfileService _profileService;
   final AuthService _authService = AuthService();
   late final ConnectionService _connectionService;
   late final ImportedContactService _importedContactService;
 
   UserProfile? _profile;
-  bool _isLoading = false;
-  String _errorMessage = '';
+  bool _isRefreshing = false;
+  String _syncStatusMessage = '';
   int _currentIndex = 0;
 
   int _digitalConnectionsCount = 0;
@@ -51,16 +54,20 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _profileService = widget.profileService ?? ProfileService();
     _connectionService = widget.connectionService ?? ConnectionService();
     _importedContactService =
         widget.importedContactService ?? ImportedContactService();
 
     if (widget.initialProfile != null) {
       _profile = widget.initialProfile;
-      _loadCounts();
-    } else {
-      _loadDashboardData();
     }
+
+    // 1. Load locally saved dashboard information immediately (offline-first)
+    _loadLocalDashboardData();
+
+    // 2. Refresh from backend when network connectivity is available
+    _refreshRemoteDashboardData();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkPendingCardCapture();
@@ -98,47 +105,144 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _loadDashboardData() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = '';
-    });
+  /// Immediately populates dashboard stats and profile from local disk storage.
+  /// Does not perform any network calls and executes in milliseconds.
+  Future<void> _loadLocalDashboardData() async {
+    // 1. Immediately read locally saved business card count
+    try {
+      final localCards =
+          await _importedContactService.localRepository.getContacts();
+      if (mounted) {
+        setState(() {
+          _businessCardsCount = localCards.length;
+        });
+      }
+    } catch (_) {}
+
+    // 2. Immediately read locally cached user profile if initialProfile was not provided
+    if (_profile == null) {
+      try {
+        final cached = await _profileService.getCachedProfile();
+        if (cached != null && mounted) {
+          setState(() {
+            _profile = cached;
+          });
+        }
+      } catch (_) {}
+    }
+
+    // 3. Immediately read locally cached digital connections count
+    try {
+      final cachedCount =
+          await _connectionService.getCachedConnectionsCount();
+      if (mounted && cachedCount > 0) {
+        setState(() {
+          _digitalConnectionsCount = cachedCount;
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// Refreshes dashboard data from the backend with bounded timeouts.
+  /// If the backend is unavailable or times out, retains all local data and surfaces
+  /// a subtle, non-intrusive status indicator with a retry action.
+  Future<void> _refreshRemoteDashboardData({bool isUserTriggered = false}) async {
+    if (_isRefreshing) return;
+
+    if (mounted) {
+      setState(() {
+        _isRefreshing = true;
+        if (isUserTriggered) {
+          _syncStatusMessage = '';
+        }
+      });
+    }
 
     try {
-      final profile = await _profileService.getMyProfile();
-      if (mounted) {
-        setState(() {
-          _profile = profile;
-        });
+      // Query profile, connections, and contacts in parallel with 10s bounded timeout
+      final profileFuture = _profileService
+          .getMyProfile()
+          .then<dynamic>((p) => p)
+          .catchError((e) => e);
+
+      final connsFuture = _connectionService
+          .getConnections()
+          .then<dynamic>((c) => c)
+          .catchError((e) => e);
+
+      final cardsFuture = _importedContactService
+          .getContacts()
+          .then<dynamic>((k) => k)
+          .catchError((e) => e);
+
+      final results = await Future.wait([profileFuture, connsFuture, cardsFuture]);
+
+      if (!mounted) return;
+
+      final profileResult = results[0];
+      final connsResult = results[1];
+      final cardsResult = results[2];
+
+      // Handle session expiration
+      if (profileResult is UnauthorizedException ||
+          connsResult is UnauthorizedException) {
+        await _authService.logout();
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (route) => false,
+          );
+        }
+        return;
       }
-      await _loadCounts();
-    } on UnauthorizedException {
-      await _authService.logout();
-      if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
-          (route) => false,
-        );
+
+      bool hasNetworkError = false;
+
+      if (profileResult is UserProfile) {
+        _profile = profileResult;
+      } else if (profileResult is Exception) {
+        hasNetworkError = true;
       }
-    } on ApiException catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = e.message;
-        });
+
+      if (connsResult is List) {
+        _digitalConnectionsCount = connsResult.length;
+      } else if (connsResult is Exception) {
+        hasNetworkError = true;
       }
+
+      if (cardsResult is List) {
+        _businessCardsCount = cardsResult.length;
+      } else if (cardsResult is Exception) {
+        hasNetworkError = true;
+      }
+
+      setState(() {
+        if (hasNetworkError) {
+          _syncStatusMessage = isUserTriggered
+              ? 'Could not connect to server. Displaying saved offline data.'
+              : 'Offline — displaying local data.';
+        } else {
+          _syncStatusMessage = '';
+        }
+      });
     } catch (_) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Failed to load profile. Please pull to refresh.';
+          _syncStatusMessage = 'Offline — displaying local data.';
         });
       }
     } finally {
       if (mounted) {
         setState(() {
-          _isLoading = false;
+          _isRefreshing = false;
         });
       }
     }
+  }
+
+  Future<void> _loadDashboardData() async {
+    await _loadLocalDashboardData();
+    await _refreshRemoteDashboardData(isUserTriggered: true);
   }
 
   Future<void> _loadCounts() async {
@@ -262,13 +366,71 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadDashboardData,
+        onRefresh: () => _refreshRemoteDashboardData(isUserTriggered: true),
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: AppSpacing.pagePadding,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Offline / Synchronization Status (Non-intrusive banner)
+              if (_syncStatusMessage.isNotEmpty) ...[
+                Container(
+                  key: const Key('home_offline_status_banner'),
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.md),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                    vertical: AppSpacing.xs + 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: AppSpacing.radiusMd,
+                    border: Border.all(
+                      color: theme.colorScheme.outlineVariant,
+                      width: 1.0,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.cloud_off_rounded,
+                        size: 16,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          _syncStatusMessage,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      if (_isRefreshing)
+                        const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else
+                        TextButton(
+                          key: const Key('home_retry_sync_button'),
+                          onPressed: () =>
+                              _refreshRemoteDashboardData(isUserTriggered: true),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                            ),
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          child: const Text('Retry'),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+
               // Welcome Header
               Container(
                 width: double.infinity,
@@ -413,34 +575,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: AppSpacing.xxl),
 
-              if (_isLoading && _profile == null) ...[
-                const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(AppSpacing.xxxl),
-                    child: CircularProgressIndicator(),
-                  ),
-                ),
-              ] else if (_errorMessage.isNotEmpty && _profile == null) ...[
-                Center(
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.error_outline_rounded,
-                        size: 48,
-                        color: theme.colorScheme.error,
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      Text(_errorMessage, textAlign: TextAlign.center),
-                      const SizedBox(height: AppSpacing.md),
-                      FilledButton.tonal(
-                        onPressed: _loadDashboardData,
-                        child: const Text('Try Again'),
-                      ),
-                    ],
-                  ),
-                ),
-              ] else ...[
-                // Primary Quick Actions Header
+              // Primary Quick Actions Header
                 Text(
                   'Quick Actions',
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -449,8 +584,77 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: AppSpacing.md),
 
-                // Primary Action 1: Scan
+                // Primary Action 1: Business Card Scanner
                 Card(
+                  key: const Key('home_business_card_scanner_card'),
+                  elevation: 0,
+                  color: theme.colorScheme.surfaceContainerLow,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: AppSpacing.radiusLg,
+                    side: BorderSide(
+                      color: theme.colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: InkWell(
+                    borderRadius: AppSpacing.radiusLg,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const BusinessCardScanScreen(),
+                        ),
+                      ).then((_) => _loadCounts());
+                    },
+                    child: Padding(
+                      padding: AppSpacing.cardPadding,
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.secondaryContainer,
+                              borderRadius: AppSpacing.radiusMd,
+                            ),
+                            child: Icon(
+                              Icons.badge_rounded,
+                              size: 26,
+                              color: theme.colorScheme.secondary,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.lg),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Business Card Scanner',
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Scan a physical business card',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+
+                // Primary Action 2: Universal QR Scanner
+                Card(
+                  key: const Key('home_universal_qr_scanner_card'),
                   elevation: 0,
                   color: theme.colorScheme.surfaceContainerLow,
                   shape: RoundedRectangleBorder(
@@ -465,9 +669,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => const BusinessCardScanScreen(),
+                          builder: (_) => const QrScannerScreen(),
                         ),
-                      ).then((_) => _loadCounts());
+                      );
                     },
                     child: Padding(
                       padding: AppSpacing.cardPadding,
@@ -491,14 +695,14 @@ class _HomeScreenState extends State<HomeScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Scan Card',
+                                  'Universal QR Scanner',
                                   style: theme.textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Scan Digital QR or physical card',
+                                  'Scan any QR code',
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: theme.colorScheme.onSurfaceVariant,
                                   ),
@@ -885,10 +1089,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ],
-            ],
+            ),
           ),
         ),
-      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: _onBottomNavTapped,

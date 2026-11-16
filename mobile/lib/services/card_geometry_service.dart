@@ -140,9 +140,13 @@ class CardGeometryResult {
   /// Capture quality assessment evaluated before OCR.
   final CaptureQualityAssessment? quality;
 
+  /// True if fallback to viewfinder safe ROI crop was applied instead of full image.
+  final bool wasRoiCropped;
+
   const CardGeometryResult({
     required this.imagePath,
     required this.wasCorrected,
+    this.wasRoiCropped = false,
     this.confidence = 0.0,
     this.corners,
     this.temporaryFilePath,
@@ -153,6 +157,7 @@ class CardGeometryResult {
       CardGeometryResult(
         imagePath: path,
         wasCorrected: false,
+        wasRoiCropped: false,
         confidence: 0.0,
         quality: quality,
       );
@@ -160,7 +165,7 @@ class CardGeometryResult {
 
 /// Service that safely detects business card boundaries and performs perspective
 /// correction before OCR when geometric confidence is high.
-/// Falls back to the original image whenever confidence is insufficient.
+/// Falls back to the viewfinder safe ROI crop (or upright image) whenever confidence is insufficient.
 class CardGeometryService {
   /// Minimum confidence (0.0 - 1.0) required before applying perspective transformation.
   final double minConfidenceThreshold;
@@ -201,7 +206,44 @@ class CardGeometryService {
       );
 
       if (detection.confidence < minConfidenceThreshold || detection.corners == null) {
-        // Edge detection confidence is insufficient -> use upright or original image
+        // Edge detection confidence is insufficient -> use safe viewfinder ROI crop if available
+        if (viewfinderRoi != null && viewfinderRoi.width > 0.1 && viewfinderRoi.height > 0.1) {
+          final marginX = (uprightImage.width * 0.03).round();
+          final marginY = (uprightImage.height * 0.03).round();
+          final cropX = max(0, (viewfinderRoi.left * uprightImage.width).round() - marginX);
+          final cropY = max(0, (viewfinderRoi.top * uprightImage.height).round() - marginY);
+          final cropW = min(uprightImage.width - cropX, (viewfinderRoi.width * uprightImage.width).round() + 2 * marginX);
+          final cropH = min(uprightImage.height - cropY, (viewfinderRoi.height * uprightImage.height).round() + 2 * marginY);
+
+          if (cropW > 100 && cropH > 100) {
+            var cropped = img.copyCrop(uprightImage, x: cropX, y: cropY, width: cropW, height: cropH);
+            final cropLongEdge = max(cropped.width, cropped.height);
+            if (cropLongEdge < 1200) {
+              final double scale = (1200 / cropLongEdge).clamp(1.1, 1.8);
+              cropped = img.copyResize(
+                cropped,
+                width: (cropped.width * scale).round(),
+                height: (cropped.height * scale).round(),
+                interpolation: img.Interpolation.linear,
+              );
+            }
+
+            final tempDir = Directory.systemTemp.path;
+            final tempFileName =
+                'digital_share_roi_crop_${DateTime.now().microsecondsSinceEpoch}.jpg';
+            final tempFile = File('$tempDir/$tempFileName');
+            await tempFile.writeAsBytes(img.encodeJpg(cropped, quality: 92), flush: true);
+            return CardGeometryResult(
+              imagePath: tempFile.path,
+              wasCorrected: false,
+              wasRoiCropped: true,
+              confidence: detection.confidence,
+              temporaryFilePath: tempFile.path,
+              quality: quality,
+            );
+          }
+        }
+
         if (hadExifOrientation) {
           final tempDir = Directory.systemTemp.path;
           final tempFileName =
@@ -211,6 +253,7 @@ class CardGeometryService {
           return CardGeometryResult(
             imagePath: tempFile.path,
             wasCorrected: false,
+            wasRoiCropped: false,
             confidence: detection.confidence,
             temporaryFilePath: tempFile.path,
             quality: quality,
@@ -219,6 +262,7 @@ class CardGeometryService {
         return CardGeometryResult(
           imagePath: imagePath,
           wasCorrected: false,
+          wasRoiCropped: false,
           confidence: detection.confidence,
           quality: quality,
         );
@@ -258,6 +302,7 @@ class CardGeometryService {
       return CardGeometryResult(
         imagePath: tempFile.path,
         wasCorrected: true,
+        wasRoiCropped: false,
         confidence: detection.confidence,
         corners: corners,
         temporaryFilePath: tempFile.path,
@@ -384,19 +429,19 @@ class CardGeometryService {
     // Compute guidance message matching prompt requirements exactly
     String guidance;
     if (isExtremelyDark) {
-      guidance = 'Too dark — improve lighting';
+      guidance = 'Move to better lighting';
     } else if (isExtremelyOverexposed) {
-      guidance = 'Possible glare — tilt card slightly';
+      guidance = 'Reduce glare';
     } else if (isClipping) {
-      guidance = 'Keep the entire card visible';
+      guidance = 'Keep the full card inside the frame';
     } else if (isTooSmall) {
-      guidance = 'Move closer';
+      guidance = 'Move closer to the card';
     } else if (isTooClose) {
       guidance = 'Move card farther away';
     } else if (isBlurry) {
-      guidance = 'Hold steady';
+      guidance = 'Hold the card steady';
     } else if (corners != null && (confidence ?? 0.0) >= 0.70) {
-      guidance = 'Ready to scan';
+      guidance = 'Card aligned';
     } else {
       guidance = 'Position card inside the frame';
     }

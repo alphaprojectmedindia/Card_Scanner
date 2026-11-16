@@ -297,9 +297,9 @@ void main() {
     });
 
     // -------------------------------------------------------------------------
-    // TEST E: THRESHOLD TEST 60 FAST PATH -> PADDLE DOES NOT RUN
+    // TEST E: BOTH ENGINES RUN FOR PHYSICAL CARDS (FAST PATH REMOVED)
     // -------------------------------------------------------------------------
-    test('TEST E: ML Kit score >= 60 with clean identity -> Fast path, Paddle does NOT run', () async {
+    test('TEST E: ML Kit and Paddle both run for physical cards and arbitrate field-by-field', () async {
       final mockMlKit = MockTestOcrEngine(
         name: 'Google ML Kit',
         resultToReturn: const OcrEngineResult(
@@ -323,12 +323,18 @@ void main() {
         name: 'PaddleOCR (PP-OCRv5 Mobile)',
         resultToReturn: const OcrEngineResult(
           engineName: 'PaddleOCR (PP-OCRv5 Mobile)',
-          rawText: '',
-          lineCount: 0,
-          characterCount: 0,
-          processingTime: Duration.zero,
+          rawText: 'Antony Lobo\nHon. Consul of Spain\nConsulate of Spain\nTel: +91 44 4210 7657\nspainconsulate.chennai@gmail.com',
+          lineCount: 5,
+          characterCount: 115,
+          processingTime: Duration(milliseconds: 3800),
           isSuccess: true,
-          detectedLines: [],
+          detectedLines: [
+            'Antony Lobo',
+            'Hon. Consul of Spain',
+            'Consulate of Spain',
+            'Tel: +91 44 4210 7657',
+            'spainconsulate.chennai@gmail.com',
+          ],
         ),
       );
 
@@ -343,8 +349,9 @@ void main() {
       );
 
       expect(mockMlKit.invocationCount, 1);
-      expect(mockPaddle.invocationCount, 0); // Fast path! Paddle NOT called!
-      expect(sideResult.metadata['fallbackInvoked'], isFalse);
+      expect(mockPaddle.invocationCount, 1); // Both engines run
+      expect(sideResult.metadata['fallbackInvoked'], isTrue);
+      expect(sideResult.metadata['timings'], isNotNull);
     });
 
     // -------------------------------------------------------------------------

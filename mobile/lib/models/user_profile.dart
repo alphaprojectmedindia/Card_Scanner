@@ -11,6 +11,7 @@ class UserProfile {
   final String? address;
   final String? bio;
   final String? profilePhotoUrl;
+  final bool isPublic;
   final DateTime createdAtUtc;
   final DateTime updatedAtUtc;
 
@@ -27,6 +28,7 @@ class UserProfile {
     this.address,
     this.bio,
     this.profilePhotoUrl,
+    this.isPublic = false,
     required this.createdAtUtc,
     required this.updatedAtUtc,
   });
@@ -53,6 +55,7 @@ class UserProfile {
       address: json['address'] as String?,
       bio: json['bio'] as String?,
       profilePhotoUrl: json['profilePhotoUrl'] as String?,
+      isPublic: json['isPublic'] as bool? ?? false,
       createdAtUtc: json['createdAtUtc'] != null
           ? DateTime.parse(json['createdAtUtc'] as String)
           : DateTime.now().toUtc(),
@@ -76,6 +79,7 @@ class UserProfile {
       'address': address,
       'bio': bio,
       'profilePhotoUrl': profilePhotoUrl,
+      'isPublic': isPublic,
       'createdAtUtc': createdAtUtc.toIso8601String(),
       'updatedAtUtc': updatedAtUtc.toIso8601String(),
     };
@@ -94,6 +98,7 @@ class UserProfile {
     String? address,
     String? bio,
     String? profilePhotoUrl,
+    bool? isPublic,
     DateTime? createdAtUtc,
     DateTime? updatedAtUtc,
   }) {
@@ -110,6 +115,7 @@ class UserProfile {
       address: address ?? this.address,
       bio: bio ?? this.bio,
       profilePhotoUrl: profilePhotoUrl ?? this.profilePhotoUrl,
+      isPublic: isPublic ?? this.isPublic,
       createdAtUtc: createdAtUtc ?? this.createdAtUtc,
       updatedAtUtc: updatedAtUtc ?? this.updatedAtUtc,
     );

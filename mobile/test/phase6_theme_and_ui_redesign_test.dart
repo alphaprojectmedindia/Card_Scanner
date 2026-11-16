@@ -196,7 +196,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Quick Actions'), findsOneWidget);
-      expect(find.text('Scan Card'), findsOneWidget);
+      expect(find.text('Business Card Scanner'), findsOneWidget);
+      expect(find.text('Universal QR Scanner'), findsOneWidget);
       expect(find.text('My Digital Card'), findsOneWidget);
       expect(find.text('QR Generator'), findsOneWidget);
       expect(find.text('Manage Contacts'), findsOneWidget);

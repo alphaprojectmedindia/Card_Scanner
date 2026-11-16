@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:digital_share/models/business_card_data.dart';
+import 'package:digital_share/models/field_evidence.dart';
 import 'package:digital_share/models/business_card_email.dart';
 import 'package:digital_share/models/business_card_phone.dart';
 import 'package:digital_share/models/check_duplicate_result.dart';
@@ -12,6 +13,7 @@ import 'package:digital_share/screens/scan/business_card_review_screen.dart';
 import 'package:digital_share/screens/scan/business_card_scan_screen.dart';
 import 'package:digital_share/services/business_card_ocr_service.dart';
 import 'package:digital_share/services/business_card_parser.dart';
+import 'package:digital_share/services/card_geometry_service.dart';
 import 'package:digital_share/services/contact_service.dart';
 import 'package:digital_share/services/imported_contact_service.dart';
 
@@ -55,6 +57,7 @@ class FakeOcrService implements IBusinessCardOcrService {
     required String imagePath,
     required CardSide side,
     String? source,
+    ViewfinderNormalizedRect? viewfinderRoi,
   }) async {
     if (shouldThrow) throw Exception('ML Kit OCR Failed');
     final text = side == CardSide.front ? frontText : backText;
@@ -131,7 +134,25 @@ class FakeImportedContactService extends ImportedContactService {
   }
 
   @override
-  Future<ImportedContact> saveContact(Map<String, dynamic> contactData) async {
+  Future<ImportedContact> saveContact(
+    Map<String, dynamic> contactData, {
+    String? frontImagePath,
+    String? backImagePath,
+    String? rawRecognizedText,
+    String? frontRawText,
+    String? backRawText,
+    List<Map<String, dynamic>> frontObservations = const [],
+    List<Map<String, dynamic>> backObservations = const [],
+    String? ocrEngineName,
+    String? ocrModelVersion,
+    double? overallOcrConfidence,
+    Map<String, FieldEvidence> fieldEvidence = const {},
+    String? parserVersion,
+    String? preprocessingVersion,
+    String? imageFingerprint,
+    String? imageDHash,
+    String? notes,
+  }) async {
     saveContactCalled = true;
     return ImportedContact(
       id: '1',

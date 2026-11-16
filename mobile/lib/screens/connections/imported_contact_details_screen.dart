@@ -6,7 +6,11 @@ import '../../services/api_client.dart';
 import '../../services/contact_communication_service.dart';
 import '../../services/contact_service.dart';
 import '../../services/imported_contact_service.dart';
+import '../../services/ocr/contact_reprocessing_service.dart';
+import '../../services/ocr/ml_kit_ocr_engine.dart';
+import '../../services/ocr/paddle_ocr_engine.dart';
 import '../../widgets/contact_message_composer.dart';
+import '../../widgets/historical_reprocess_diff_dialog.dart';
 import 'edit_imported_contact_screen.dart';
 
 class ImportedContactDetailsScreen extends StatefulWidget {
@@ -33,12 +37,115 @@ class _ImportedContactDetailsScreenState
   late ImportedContact _contact;
   late final ImportedContactService _contactService;
   bool _isDeleting = false;
+  bool _isReprocessing = false;
 
   @override
   void initState() {
     super.initState();
     _contact = widget.contact;
     _contactService = widget.contactService ?? ImportedContactService();
+  }
+
+  Future<void> _handleReprocessCard() async {
+    final record = await _contactService.localRepository.getRecordById(_contact.id);
+    if (record == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Contact not found in local storage.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final imageStorage = _contactService.localRepository.imageStorageService;
+    final hasFront = await imageStorage.verifyImageFile(record.frontImagePath);
+    final hasBack = await imageStorage.verifyImageFile(record.backImagePath);
+
+    if (!hasFront && !hasBack) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Original card images are missing or not stored locally.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isReprocessing = true;
+    });
+
+    try {
+      final reprocessor = ContactReprocessingService(
+        imageStorageService: imageStorage,
+      );
+
+      final diff = await reprocessor.reprocessHistoricalContact(
+        record: record,
+        primaryEngine: PaddleOcrEngine(),
+        secondaryEngine: MlKitOcrEngine(),
+        learningService: _contactService.localRepository.learningService,
+        userId: record.userId,
+      );
+
+      if (!mounted) return;
+
+      if (!diff.wasReprocessed || !diff.hasChanges) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Card details are already verified and up to date.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      await showDialog<String>(
+        context: context,
+        builder: (ctx) => HistoricalReprocessDiffDialog(
+          originalRecord: record,
+          diff: diff,
+          onAccept: (acceptedFields) async {
+            final updated = await reprocessor.applyApprovedHistoricalDiff(
+              record: record,
+              diff: diff,
+              acceptedFieldNames: acceptedFields,
+              learningService: _contactService.localRepository.learningService,
+              userId: record.userId,
+            );
+            await _contactService.localRepository.updateLocalRecord(updated);
+            if (mounted) {
+              setState(() {
+                _contact = updated.toImportedContact();
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Card details updated from re-OCR!'),
+                  behavior: SnackBarBehavior.floating,
+                ),
+              );
+            }
+          },
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Reprocessing failed: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isReprocessing = false;
+        });
+      }
+    }
   }
 
   Future<void> _handleDelete() async {
@@ -135,22 +242,39 @@ class _ImportedContactDetailsScreenState
         title: const Text('Contact Details'),
         actions: [
           IconButton(
+            key: const Key('reprocess_card_button'),
+            icon: const Icon(Icons.auto_fix_high_rounded),
+            tooltip: 'Reprocess Card with OCR',
+            onPressed: _isReprocessing || _isDeleting ? null : _handleReprocessCard,
+          ),
+          IconButton(
             key: const Key('edit_imported_contact_button'),
             icon: const Icon(Icons.edit_outlined),
             tooltip: 'Edit details',
-            onPressed: _handleEdit,
+            onPressed: _isReprocessing || _isDeleting ? null : _handleEdit,
           ),
           IconButton(
             key: const Key('delete_imported_contact_button'),
             icon: Icon(Icons.delete_outline_rounded,
                 color: theme.colorScheme.error),
             tooltip: 'Delete contact',
-            onPressed: _handleDelete,
+            onPressed: _isReprocessing || _isDeleting ? null : _handleDelete,
           ),
         ],
       ),
-      body: _isDeleting
-          ? const Center(child: CircularProgressIndicator())
+      body: _isDeleting || _isReprocessing
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(_isDeleting
+                      ? 'Deleting card...'
+                      : 'Reprocessing card with on-device OCR...'),
+                ],
+              ),
+            )
           : SingleChildScrollView(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
               child: Column(
@@ -324,6 +448,82 @@ class _ImportedContactDetailsScreenState
                     const SizedBox(height: 20),
                   ],
 
+                  // Personal Remark Section
+                  _buildSectionHeader(context, 'MY PERSONAL REMARK'),
+                  const SizedBox(height: 8),
+                  Card(
+                    elevation: 0,
+                    color: theme.colorScheme.surfaceContainerLow,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.lock_outline_rounded,
+                                size: 16,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Private Note',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const Spacer(),
+                              TextButton.icon(
+                                key: const Key('edit_remark_button'),
+                                icon: Icon(
+                                  _contact.personalRemark != null &&
+                                          _contact.personalRemark!.isNotEmpty
+                                      ? Icons.edit_outlined
+                                      : Icons.add_comment_outlined,
+                                  size: 16,
+                                ),
+                                label: Text(
+                                  _contact.personalRemark != null &&
+                                          _contact.personalRemark!.isNotEmpty
+                                      ? 'Edit'
+                                      : 'Add Remark',
+                                ),
+                                onPressed: () => _showEditRemarkDialog(context),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            _contact.personalRemark != null &&
+                                    _contact.personalRemark!.isNotEmpty
+                                ? _contact.personalRemark!
+                                : 'No personal remark added yet.',
+                            key: const Key('contact_details_personal_remark_text'),
+                            style: TextStyle(
+                              fontSize: 14,
+                              height: 1.4,
+                              fontStyle: _contact.personalRemark != null &&
+                                      _contact.personalRemark!.isNotEmpty
+                                  ? FontStyle.normal
+                                  : FontStyle.italic,
+                              color: _contact.personalRemark != null &&
+                                      _contact.personalRemark!.isNotEmpty
+                                  ? theme.colorScheme.onSurface
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
                   const SizedBox(height: 10),
                   const Divider(),
                   const SizedBox(height: 16),
@@ -365,6 +565,127 @@ class _ImportedContactDetailsScreenState
             letterSpacing: 1.1,
             color: Theme.of(context).colorScheme.primary,
           ),
+    );
+  }
+
+  Future<void> _showEditRemarkDialog(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final textController =
+        TextEditingController(text: _contact.personalRemark ?? '');
+    final bool hasExisting =
+        _contact.personalRemark != null && _contact.personalRemark!.isNotEmpty;
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final charCount = textController.text.length;
+            return AlertDialog(
+              title: const Text('My Personal Remark'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Add a nickname or a note to help you remember this person. Strictly private to you.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    key: const Key('edit_remark_input'),
+                    controller: textController,
+                    maxLength: 2000,
+                    maxLines: 4,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: InputDecoration(
+                      hintText:
+                          'e.g., Met at Chennai conference, referred by Rajesh...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      counterText: '$charCount / 2000',
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                if (hasExisting)
+                  TextButton(
+                    key: const Key('clear_remark_button'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.red),
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      try {
+                        final updated =
+                            await _contactService.clearRemark(_contact.id);
+                        if (mounted) {
+                          setState(() {
+                            _contact = updated;
+                          });
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Remark removed.'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to clear remark: $e'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      }
+                    },
+                    child: const Text('Clear'),
+                  ),
+                TextButton(
+                  key: const Key('cancel_remark_button'),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  key: const Key('save_remark_button'),
+                  onPressed: () async {
+                    final text = textController.text.trim();
+                    Navigator.of(ctx).pop();
+                    try {
+                      final updated = text.isNotEmpty
+                          ? await _contactService.updateRemark(_contact.id, text)
+                          : await _contactService.clearRemark(_contact.id);
+                      if (mounted) {
+                        setState(() {
+                          _contact = updated;
+                        });
+                        messenger.showSnackBar(
+                          const SnackBar(
+                            content: Text('Remark updated.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        messenger.showSnackBar(
+                          SnackBar(
+                            content: Text('Failed to update remark: $e'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

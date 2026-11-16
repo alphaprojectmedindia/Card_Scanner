@@ -1,0 +1,73 @@
+# ==============================================================================
+# Render Blueprint Configuration (render.yaml)
+# Digital Share Infrastructure: Web Service (ASP.NET Core 8) + PostgreSQL Database
+# ==============================================================================
+
+services:
+  - type: web
+    name: digital-share-api
+    runtime: docker
+    dockerfilePath: ./backend/DigitalShare.Api/Dockerfile
+    dockerContext: .
+    region: singapore
+    plan: starter
+    healthCheckPath: /health
+    disk:
+      name: digital-share-uploads
+      mountPath: /app/uploads
+      sizeGB: 1
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: digital-share-db
+          property: connectionString
+      - key: Jwt__Issuer
+        value: DigitalShare.Api
+      - key: Jwt__Audience
+        value: DigitalShare.MobileApp
+      - key: Jwt__SecretKey
+        generateValue: true
+      - key: Jwt__ExpiryMinutes
+        value: "60"
+      - key: Jwt__RefreshTokenExpiryDays
+        value: "30"
+      - key: Gemini__ApiKey
+        sync: false
+      - key: Gemini__ModelId
+        value: gemini-3.8-flash
+      - key: Gemini__FallbackModelId
+        value: gemini-3.5-flash-lite
+      - key: Gemini__Enabled
+        value: "true"
+      - key: Gemini__TimeoutSeconds
+        value: "8"
+      - key: Gemini__MaxRetries
+        value: "2"
+      - key: Storage__Provider
+        value: Local
+      - key: Storage__Local__Directory
+        value: uploads/temp-scans
+      - key: Storage__Local__MaxFileSizeMb
+        value: "20"
+      # Optional Cloudflare R2 variables (if Storage__Provider is set to R2)
+      - key: Storage__R2__AccountId
+        sync: false
+      - key: Storage__R2__AccessKeyId
+        sync: false
+      - key: Storage__R2__SecretAccessKey
+        sync: false
+      - key: Storage__R2__BucketName
+        value: digitalshare-scans-dev
+      - key: Storage__R2__ServiceUrl
+        sync: false
+
+databases:
+  - name: digital-share-db
+    databaseName: digital_share_db
+    user: digital_share_user
+    region: singapore
+    plan: starter
+    postgresMajorVersion: "16"
+

@@ -34,4 +34,9 @@ public class UpdateProfileRequest
 
     [MaxLength(500, ErrorMessage = "Profile photo URL cannot exceed 500 characters.")]
     public string? ProfilePhotoUrl { get; set; }
+
+    /// <summary>
+    /// Optional account visibility flag: true for Public, false for Private.
+    /// </summary>
+    public bool? IsPublic { get; set; }
 }

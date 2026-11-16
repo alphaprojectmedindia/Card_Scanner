@@ -1,3 +1,5 @@
+import 'ocr_observation.dart';
+
 /// Unified result model representing output from any OCR engine.
 class OcrEngineResult {
   /// Identifying name of the OCR engine (e.g., 'Google ML Kit', 'PaddleOCR (PP-OCRv5 Mobile)').
@@ -24,6 +26,9 @@ class OcrEngineResult {
   /// Ordered individual lines recognized by the engine.
   final List<String> detectedLines;
 
+  /// Structured geometry and confidence observations for each recognized line/token.
+  final List<OcrObservation> observations;
+
   /// Optional engine-specific diagnostic metadata (e.g. model version, detection box count).
   final Map<String, dynamic> metadata;
 
@@ -36,6 +41,7 @@ class OcrEngineResult {
     this.error,
     this.isSuccess = true,
     this.detectedLines = const [],
+    this.observations = const [],
     this.metadata = const {},
   });
 
@@ -55,6 +61,7 @@ class OcrEngineResult {
       error: error,
       isSuccess: false,
       detectedLines: const [],
+      observations: const [],
       metadata: metadata,
     );
   }

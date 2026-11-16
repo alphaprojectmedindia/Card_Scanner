@@ -704,7 +704,7 @@ class QrScannerScreenState extends State<QrScannerScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('Scan QR Code'),
+        title: const Text('Universal QR Scanner'),
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         actions: [
@@ -832,14 +832,29 @@ class QrScannerScreenState extends State<QrScannerScreen>
                   color: Colors.black.withValues(alpha: 0.65),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Text(
-                  'Scan Digital Share profiles, websites, Wi-Fi, contacts, locations and more.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Text(
+                      'Point your camera at any QR code',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Supports links, Wi-Fi, contacts, WhatsApp and more.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        fontWeight: FontWeight.normal,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

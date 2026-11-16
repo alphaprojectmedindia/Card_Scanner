@@ -671,8 +671,8 @@ void main() {
       expect(res.rawText, contains('Rajesh Sharma'));
     });
 
-    // 29. Gallery ML Kit >=60 with strong semantics can use fast path
-    test('29. Gallery ML Kit score >= 60 with clean identity uses fast path (Paddle does not run)', () async {
+    // 29. Gallery card dual-engine execution runs both ML Kit and PaddleOCR
+    test('29. Gallery card dual-engine execution runs both ML Kit and PaddleOCR', () async {
       final path = createTestImageFile(filename: 'strong_mlkit.jpg', width: 1400, height: 900);
       final mockMlKit = TestMockEngine(
         name: 'Google ML Kit',
@@ -703,7 +703,7 @@ void main() {
       final res = await service.processCardSide(imagePath: path, side: CardSide.front, source: 'gallery');
 
       expect(mockMlKit.invocationCount, 1);
-      expect(mockPaddle.invocationCount, 0); // Fast path!
+      expect(mockPaddle.invocationCount, 1); // Both engines run!
       expect(res.rawText, contains('Vikram Seth'));
     });
 

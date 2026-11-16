@@ -24,6 +24,11 @@ public class JwtTokenGenerator : IJwtTokenGenerator
             throw new InvalidOperationException("JWT SecretKey is not configured.");
         }
 
+        if (Encoding.UTF8.GetByteCount(_jwtOptions.SecretKey) < 32)
+        {
+            throw new InvalidOperationException("JWT SecretKey must be at least 256 bits (32 bytes) for HMAC-SHA256.");
+        }
+
         var tokenHandler = new JwtSecurityTokenHandler();
         var key = Encoding.UTF8.GetBytes(_jwtOptions.SecretKey);
         var expirationUtc = DateTime.UtcNow.AddMinutes(_jwtOptions.ExpiryMinutes > 0 ? _jwtOptions.ExpiryMinutes : 60);

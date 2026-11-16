@@ -56,9 +56,9 @@ class MockEngine implements OcrEngine {
 void main() {
   group('Hybrid OCR Pipeline Selection & Fallback Tests (Prompt Section 25)', () {
     // -------------------------------------------------------------------------
-    // 1. Fast Path: ML Kit Strong -> PaddleOCR NOT called
+    // 1. Dual Engine Execution: Both ML Kit and PaddleOCR execute for physical cards
     // -------------------------------------------------------------------------
-    test('1. ML Kit strong -> Fast path completes, PaddleOCR NOT called', () async {
+    test('1. Physical card capture -> Both ML Kit and PaddleOCR run for field-level resolution', () async {
       final mockMlKit = MockEngine(
         name: 'Google ML Kit',
         resultToReturn: const OcrEngineResult(
@@ -80,6 +80,21 @@ void main() {
 
       final mockPaddle = MockEngine(
         name: 'PaddleOCR (PP-OCRv5 Mobile)',
+        resultToReturn: const OcrEngineResult(
+          engineName: 'PaddleOCR (PP-OCRv5 Mobile)',
+          rawText: 'Rahul Kumar\nSenior Developer\nABC Technologies\n+91 98765 43210\nrahul@abctech.com',
+          lineCount: 5,
+          characterCount: 85,
+          processingTime: Duration(milliseconds: 3800),
+          isSuccess: true,
+          detectedLines: [
+            'Rahul Kumar',
+            'Senior Developer',
+            'ABC Technologies',
+            '+91 98765 43210',
+            'rahul@abctech.com',
+          ],
+        ),
       );
 
       final pipeline = HybridOcrPipeline(
@@ -93,11 +108,14 @@ void main() {
       );
 
       expect(mockMlKit.invocationCount, 1);
-      // PaddleOCR MUST NOT be called for strong ML Kit results!
-      expect(mockPaddle.invocationCount, 0);
-      expect(result.metadata['fallbackInvoked'], isFalse);
+      // Both engines run for every physical card capture
+      expect(mockPaddle.invocationCount, 1);
+      expect(result.metadata['fallbackInvoked'], isTrue);
       expect(result.rawText, contains('Rahul Kumar'));
       expect(result.lines.length, 5);
+      expect(result.metadata['timings'], isNotNull);
+      expect(result.metadata['mlKitMs'], isNotNull);
+      expect(result.metadata['paddleMs'], isNotNull);
     });
 
     // -------------------------------------------------------------------------
@@ -363,7 +381,7 @@ void main() {
   });
 
   group('Front + Back Independent Evaluation Tests (Prompt Section 26)', () {
-    test('7. Front strong / Back strong -> PaddleOCR never invoked for either side', () async {
+    test('7. Front + Back -> Both ML Kit and PaddleOCR run for each side', () async {
       final mockMlKit = MockEngine(
         name: 'Google ML Kit',
         resultToReturn: const OcrEngineResult(
@@ -385,6 +403,21 @@ void main() {
 
       final mockPaddle = MockEngine(
         name: 'PaddleOCR (PP-OCRv5 Mobile)',
+        resultToReturn: const OcrEngineResult(
+          engineName: 'PaddleOCR (PP-OCRv5 Mobile)',
+          rawText: 'Rahul Kumar\nCEO\nTech Corp\n+91 98765 43210\nrahul@techcorp.com',
+          lineCount: 5,
+          characterCount: 65,
+          processingTime: Duration(milliseconds: 3800),
+          isSuccess: true,
+          detectedLines: [
+            'Rahul Kumar',
+            'CEO',
+            'Tech Corp',
+            '+91 98765 43210',
+            'rahul@techcorp.com',
+          ],
+        ),
       );
 
       final pipeline = HybridOcrPipeline(
@@ -409,12 +442,12 @@ void main() {
       );
 
       expect(mockMlKit.invocationCount, 2);
-      expect(mockPaddle.invocationCount, 0); // Never called!
+      expect(mockPaddle.invocationCount, 2); // Both run for front and back
       expect(front.rawText, contains('Rahul Kumar'));
       expect(back.rawText, contains('Rahul Kumar'));
     });
 
-    test('8. Front strong / Back weak -> PaddleOCR called ONLY for back side', () async {
+    test('8. Front + Back with complementary data merges correctly', () async {
       final mockMlKit = MockEngine(
         name: 'Google ML Kit',
       );
@@ -478,7 +511,7 @@ void main() {
         imagePath: '/test/front.jpg',
         side: CardSide.front,
       );
-      expect(mockPaddle.invocationCount, 0); // No paddle for front
+      expect(mockPaddle.invocationCount, 1); // Paddle runs for front
 
       // Switch ML Kit mock to return weak for back
       mockMlKit.resultToReturn = weakBack;
@@ -488,7 +521,7 @@ void main() {
         imagePath: '/test/back.jpg',
         side: CardSide.back,
       );
-      expect(mockPaddle.invocationCount, 1); // Paddle called once for back side!
+      expect(mockPaddle.invocationCount, 2); // Paddle runs for back
 
       // 3. Merging dual-sided card via BusinessCardParser
       const parser = BusinessCardParser();

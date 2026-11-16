@@ -38,37 +38,43 @@ class FieldSemanticEvaluator {
 
   // Common corporate legal entity suffixes
   static final RegExp _orgSuffixRegExp = RegExp(
-    r'\b(ltd\.?|limited|pvt\.?|private|llc|llp|inc\.?|incorporated|corp\.?|corporation|company|co\.?|gmbh|sa|ag|undertaking|foundation|trust|society|federation|association|council|board|ministry|department|consulate|embassy)\b',
+    r'\b(ltd\.?|limited|pvt\.?|private|llc|llp|inc\.?|incorporated|corp\.?|corporation|company|co\.?|gmbh|sa|ag|plc|bhd|srl|pty|nv|bv|undertaking|foundation|trust|society|federation|association|council|board|ministry|department|consulate|embassy|government|govt\.?|court|high\s+court|supreme\s+court|realty|realtors|brokerage)\b',
     caseSensitive: false,
   );
 
   // Common organization / industry category keywords
   static final RegExp _companyTypeTokensRegExp = RegExp(
-    r'\b(technologies|technology|solutions|services|enterprises|industries|systems|laboratories|labs|holdings|group|consulting|consultancy|agency|studio|studios|associates|partners|chambers|law\s+firm|hospital|hospitals|clinic|clinics|infirmary|dispensary|university|college|school|institute|academy|bank|banking|insurance|securities|investments|builders|construction|contractors|motors|garage|realty|properties|events|electronics|global|international|shipping|logistics|freight|dispatch|trading|corporation|hardware|software)\b',
+    r'\b(technologies|technology|solutions|services|enterprises|industries|systems|laboratories|labs|holdings|holding|group|consulting|consultancy|agency|studio|studios|associates|partners|chambers|law\s+firm|healthcare|health\s+care|hospital|hospitals|clinic|clinics|infirmary|dispensary|medical|medical\s+mission|medical\s+center|medical\s+centre|equipments|equipment|engineering|manufacturing|traders|trader|foundation|trust|society|mission|university|college|school|institute|academy|institutions|institution|educational|education|bank|banking|insurance|securities|investments|builders|construction|contractors|motors|garage|realty|properties|events|electronics|global|international|worldwide|shipping|logistics|freight|dispatch|trading|corporation|corporations|hardware|software|assistance|emergency|helpline|support|networks|network|ventures|innovations|innovation|dynamics|infotech|interactive|communications|capital|finance|financial|works|pharma|pharmaceuticals|diagnostics|dental|medicare|opticals|creations|designs|apparel|textiles|jewellers|jewellery|furnishings|interiors|security|production|press|publications|publishers|news|broadcasting|automation|energy|power|solar|biotech|chemicals|metals|minerals|agro|farms|foods|beverages|hospitality|hotels|hotel|resorts|resort|travels|travel|tours|tour|express|courier|consultants|realtors|developers|management|advisory|analytics|club|clubs|federation|association|alliance|league)\b',
+    caseSensitive: false,
+  );
+
+  // Common quality, management and professional certifications (must not become name, company, or phone)
+  static final RegExp _certificationRegExp = RegExp(
+    r'\b(?:iso(?:\s*[:\-\d]|\b)|iso\s*\d+(?::\d+)?|ce\s*\d+|gmp|nabh|nabl|halal|kosher|fda|isi|bis)\b',
     caseSensitive: false,
   );
 
   // Common job titles and occupational designations
   static final RegExp _titleTokensRegExp = RegExp(
-    r'\b(director|managing\s+director|executive\s+director|manager|general\s+manager|sales\s+manager|project\s+manager|product\s+manager|marketing\s+manager|engineer|software\s+engineer|developer|consultant|senior\s+consultant|officer|consul|hon\.\s*consul|president|vice\s+president|vp|head|lead|founder|co-founder|partner|specialist|analyst|associate|architect|designer|coordinator|advisor|executive|supervisor|administrator|secretary|additional\s+chief\s+secretary|attorney|counsel|advocate|solicitor|professor|associate\s+professor|assistant\s+professor|lecturer|scientist|researcher|surgeon|physician|doctor|cardiologist|neurologist|dermatologist|pediatrician|oncologist|accountant|chartered\s+accountant|auditor|proprietor|trustee)\b',
+    r'\b(director|managing\s+director|executive\s+director|international\s+director|medical\s+director|manager|general\s+manager|sales\s+manager|project\s+manager|product\s+manager|marketing\s+manager|engineer|software\s+engineer|developer|consultant|senior\s+consultant|officer|hon\.\s*consul\s+of\s+spain|consul\s+of\s+spain|hon\.\s*consul|hon\s+consul|honorary\s+consul|consul|president|vice\s+president|vp|head|lead|founder\s*&\s*chairman|founder\s+and\s+chairman|chairman\s*&\s*managing\s+director|director\s*&\s*ceo|founder\s*&\s*ceo|chairman|founder|co-founder|partner|specialist|analyst|associate|architect|designer|coordinator|advisor|executive|supervisor|administrator|secretary|additional\s+chief\s+secretary|attorney|counsel|advocate|solicitor|professor|associate\s+professor|assistant\s+professor|lecturer|scientist|researcher|transplant\s+surgeon|cardiac\s+surgeon|neuro\s+surgeon|orthopedic\s+surgeon|surgeon|physician|doctor|cardiologist|neurologist|dermatologist|pediatrician|oncologist|nephrologist|urologist|pathologist|radiologist|anesthesiologist|clinical\s+psychologist|psychologist|therapist|nurse|practitioner|accountant|chartered\s+accountant|auditor|proprietor|trustee|managing\s+trustee|ceo|cto|cfo|coo|cmo|cio|data\s+scientist|tech\s+lead|solution\s+architect|enterprise\s+architect|ui\/ux\s+designer|graphic\s+designer|creative\s+director|legal\s+counsel|general\s+counsel|managing\s+partner|senior\s+partner|physiotherapist|optometrist|pharmacist|dean|principal|fellow|magistrate|judge|barrister|broker|realtor|chef|curator|editor|journalist|correspondent|trainer|instructor)\b',
     caseSensitive: false,
   );
 
   // Common occupational title modifiers
   static final RegExp _titleModifierRegExp = RegExp(
-    r'\b(senior|sr\.?|junior|jr\.?|chief|lead|head|principal|executive|assistant|associate|deputy|vice|general|regional|global|group|managing|operations|technical|strategy|strategic|business|marketing|sales|product|project)\b',
+    r'\b(senior|sr\.?|junior|jr\.?|chief|lead|head|principal|executive|assistant|associate|deputy|vice|general|regional|global|group|managing|operations|technical|strategy|strategic|business|marketing|sales|product|project|international)\b',
     caseSensitive: false,
   );
 
   // Structural address indicators (streets, roads, numbers, postal codes, locality patterns)
   static final RegExp _addressTokensRegExp = RegExp(
-    r'\b(road|rd\.?|street|st\.?|avenue|ave\.?|lane|ln\.?|boulevard|blvd\.?|drive|dr\.?|way|circle|nagar|salai|marg|chowk|sector|block|floor|suite|plot|building|bldg\.?|tower|towers|plaza|complex|cross|main|po\s+box|p\.o\.|pin|zip|post|colony|layout|enclave|opp\.?|opposite|near|behind)\b|\b(?<!real\s)estate\b|\b\d{1,4}[A-Za-z]?[\s,\-\/]+(?:road|rd|street|st|avenue|ave|lane|ln|drive|dr|nagar|salai|marg|sector|block|cross|main)\b|\b\d{5,6}\b|\b[1-9][0-9]{2}\s?[0-9]{3}\b|\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b',
+    r'\b(road|rd\.?|street|st\.?|avenue|ave\.?|lane|ln\.?|boulevard|blvd\.?|drive|dr\.?|broadway|highway|hwy\.?|expressway|way|circle|nagar|salai|marg|chowk|rasta|gali|mohalla|bazaar|mandi|peth|thottam|alley|sector|block|pocket|wing|stage|floor|ground\s+floor|first\s+floor|second\s+floor|third\s+floor|basement|mezzanine|suite|plot|site|survey\s*no|sy\.?\s*no|s\.?f\.?\s*no|door\s*no|d\.?\s*no|d\/no|flat\s*no|shop\s*no|unit\s*no|shed\s*no|premises|building|bldg\.?|tower|towers|plaza|complex|mall|arcade|court|house|mansion|mansions|enclave|apartment|apartments|apt\.?|flat|residency|villa|villas|heights|cross|main|headquarters|hq|office|po\s*box|p\.?o\.?\s*box|pin|pincode|pin\s*code|zip|zipcode|zip\s*code|postal\s*code|post|colony|layout|extension|extn\.?|opp\.?|opposite|near|behind|adjacent|beside|next\s+to|above|below|palayam|koundampalayam|puram|patti|patty|halli|wadi|baug|cheri|kulam|pet|industrial\s+(?:area|estate|park|zone|layout|phase)|sez|tech\s+park|it\s+park|cyber\s+city|cyber\s+park|infocity|campus|phase\s+[0-9a-zA-Z]+|[a-zA-Z]{3,}\s+(?:east|west|north|south)|district|dist\.?|mandal|taluk|taluka|tehsil|panchayat|village|division|circle|house\s*[-–#]?\s*\d+|road\s*[-–#]?\s*\d+|block\s*[-–#]?\s*[a-zA-Z0-9]+|new\s+no\.?\s*\d+|old\s+no\.?\s*[0-9a-zA-Z-]+)\b|\b(?<!real\s)estate\b|\b\d{1,4}[A-Za-z]?[\s,\-\/]+(?:road|rd|street|st|avenue|ave|lane|ln|drive|dr|broadway|nagar|salai|marg|sector|block|cross|main)\b|\b\d{5,6}\b|\b[1-9][0-9]{2}\s?[0-9]{3}\b|\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b',
     caseSensitive: false,
   );
 
   // Prominent geographical names / major world & Indian cities (generic heuristic support)
   static final RegExp _majorGeographicalTokensRegExp = RegExp(
-    r'\b(chennai|bangalore|bengaluru|mumbai|delhi|new\s+delhi|hyderabad|kolkata|pune|ahmedabad|jaipur|kochi|coimbatore|madurai|trichy|mysore|calicut|chandigarh|lucknow|kanpur|nagpur|indore|bhopal|patna|vadodara|surat|visakhapatnam|thiruvananthapuram|new\s+york|san\s+francisco|los\s+angeles|chicago|houston|austin|seattle|london|paris|berlin|tokyo|singapore|dubai|abu\s+dhabi|sydney|melbourne|toronto|vancouver|california|texas|florida|tamil\s+nadu|karnataka|maharashtra|kerala|andhra\s+pradesh|telangana|gujarat|india|usa|uk|united\s+states|united\s+kingdom|germany|france|spain|italy|australia|canada)\b',
+    r'\b(dhaka|banani|bangladesh|chennai|bangalore|bengaluru|mumbai|delhi|new\s+delhi|hyderabad|secunderabad|kolkata|pune|ahmedabad|jaipur|kochi|coimbatore|madurai|trichy|tiruchirappalli|mysore|mysuru|calicut|kozhikode|trivandrum|thiruvananthapuram|chandigarh|lucknow|kanpur|nagpur|indore|bhopal|patna|vadodara|surat|visakhapatnam|noida|greater\s+noida|gurgaon|gurugram|faridabad|ghaziabad|navi\s+mumbai|thane|kalyan|nashik|aurangabad|solapur|kolhapur|rajkot|bhavnagar|jamnagar|gandhinagar|jabalpur|gwalior|ujjain|raipur|bilaspur|jodhpur|kota|bikaner|ajmer|udaipur|varanasi|prayagraj|allahabad|agra|meerut|bareilly|aligarh|moradabad|gorakhpur|gaya|bhagalpur|muzaffarpur|ranchi|jamshedpur|dhanbad|bhubaneswar|cuttack|rourkela|howrah|durgapur|asansol|siliguri|guwahati|ludhiana|amritsar|jalandhar|dehradun|haridwar|shimla|jammu|srinagar|warangal|nizamabad|karimnagar|vijayawada|guntur|nellore|kurnool|tirupati|kakinada|hubli|hubballi|dharwad|mangaluru|mangalore|belgaum|belagavi|gulbarga|kalaburagi|davanagere|bellary|ballari|thrissur|kollam|kannur|alappuzha|palakkad|kottayam|salem|tirunelveli|tiruppur|tirupur|erode|vellore|thoothukudi|dindigul|thanjavur|ranipet|sivakasi|karur|ooty|udhagamandalam|hosur|nagercoil|kanchipuram|kumarapalayam|karaikkudi|neyveli|cuddalore|kumbakonam|tiruvannamalai|pollachi|rajapalayam|pudukkottai|puducherry|pondicherry|new\s+york|san\s+francisco|los\s+angeles|chicago|houston|austin|seattle|dallas|boston|miami|atlanta|denver|london|manchester|birmingham|leeds|paris|berlin|frankfurt|munich|tokyo|singapore|dubai|abu\s+dhabi|doha|riyadh|sydney|melbourne|brisbane|toronto|vancouver|montreal|california|texas|florida|new\s+jersey|illinois|washington|new\s+south\s+wales|victoria|ontario|quebec|tamil\s+nadu|karnataka|maharashtra|kerala|andhra\s+pradesh|telangana|gujarat|rajasthan|uttar\s+pradesh|madhya\s+pradesh|west\s+bengal|punjab|haryana|bihar|odisha|assam|goa|uttarakhand|himachal\s+pradesh|jharkhand|chhattisgarh|india|usa|uk|united\s+states|united\s+kingdom|germany|france|spain|italy|australia|canada|japan|uae|united\s+arab\s+emirates|saudi\s+arabia|netherlands|switzerland|sweden|ireland|new\s+zealand)\b',
     caseSensitive: false,
   );
 
@@ -104,6 +110,158 @@ class FieldSemanticEvaluator {
   static final RegExp _corruptedWordRegExp = RegExp(
     r'\b[A-Za-z]+[b-df-hj-np-tv-z]{2,}[A-Z][b-df-hj-np-tv-z]+[a-z]*\b|\b[a-zA-Z]+[0-9|~`!#$%^&*()_+=|\\{}[\];<>?][a-zA-Z]+\b',
   );
+
+  /// Computes a conservative text-quality score (0.0 to 1.0) without requiring a dictionary.
+  /// Penalizes suspicious OCR artifacts: mixed digits & letters, bizarre punctuation,
+  /// excessive isolated chars, corruption, and impossible consonant runs.
+  /// Preserves legitimate personal names, Indian/international names, initials,
+  /// abbreviations, company names, and medical terminology.
+  static double computeTextQualityScore(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return 0.0;
+    if (trimmed.length < 2) {
+      if (RegExp(r'^[A-Za-z&]$').hasMatch(trimmed)) return 0.70;
+      return 0.10;
+    }
+
+    double score = 1.0;
+    final words = trimmed.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+
+    // 1. Mixed alphanumeric tokens (e.g. "9Word", "T0ken", "Item123")
+    // Allow legitimate ordinals (1st, 2nd, 3rd, 4th...) and short abbreviations (3M, B2B, 4G, 5G, A4, V8)
+    final ordinalPattern = RegExp(r'^\d+(?:st|nd|rd|th)$', caseSensitive: false);
+    final validAlphaNumPattern =
+        RegExp(r'^(?:3m|b2b|b2c|4g|5g|a4|v8|mp3|mp4|2d|3d)$', caseSensitive: false);
+
+    int mixedWordCount = 0;
+    for (final w in words) {
+      final clean = w.replaceAll(RegExp(r'^[^\w]+|[^\w]+$'), '');
+      if (clean.length >= 2 &&
+          clean.contains(RegExp(r'[a-zA-Z]')) &&
+          clean.contains(RegExp(r'\d')) &&
+          !ordinalPattern.hasMatch(clean) &&
+          !validAlphaNumPattern.hasMatch(clean)) {
+        mixedWordCount++;
+      }
+    }
+    if (mixedWordCount > 0) {
+      score -= (0.45 * mixedWordCount);
+    }
+
+    // 2. Impossible or bizarre punctuation / symbols (e.g. "!!", "~~", "||", "$$", "%%", "#", "^", "{", "}")
+    if (RegExp(r'[!~|%#$^<>{}=\\]{2,}').hasMatch(trimmed) ||
+        RegExp(r'[~|%#$^<>{}=\\]').hasMatch(trimmed)) {
+      score -= 0.35;
+    }
+
+    // 3. Trailing OCR corruption / cutoffs (e.g. "Text!!", "Word...", "John...")
+    if (RegExp(r'\.{2,}$').hasMatch(trimmed) || RegExp(r'!+$').hasMatch(trimmed)) {
+      score -= 0.20;
+    }
+
+    // 4. Excessive isolated single characters (e.g. "a b c d e")
+    if (words.length >= 3) {
+      final singleCharWords = words.where((w) {
+        final clean = w.replaceAll(RegExp(r'[^a-zA-Z]'), '');
+        return clean.length == 1;
+      }).length;
+      if (singleCharWords / words.length > 0.40) {
+        score -= 0.35;
+      }
+    }
+
+    // 5. Improbable consonant clusters without vowels (>= 5 consonants, e.g. "bcdfgh")
+    // Exclude uppercase acronyms/credentials like "MBBS", "FRCS", "LLC", "IAS", "Pvt"
+    for (final w in words) {
+      final clean = w.replaceAll(RegExp(r'[^a-zA-Z]'), '');
+      if (clean.length >= 5 &&
+          clean != clean.toUpperCase() &&
+          RegExp(r'[bcdfghjklmnpqrstvwxyzBCDFGHJKLMNPQRSTVWXYZ]{5,}').hasMatch(clean)) {
+        score -= 0.35;
+        break;
+      }
+    }
+
+    // 6. Multiple case flips inside a single word (e.g. "wOrD", "bOad")
+    for (final w in words) {
+      final clean = w.replaceAll(RegExp(r'[^a-zA-Z]'), '');
+      if (clean.length >= 4) {
+        int caseChanges = 0;
+        for (int i = 0; i < clean.length - 1; i++) {
+          final isUpper1 = clean[i] == clean[i].toUpperCase();
+          final isUpper2 = clean[i + 1] == clean[i + 1].toUpperCase();
+          if (isUpper1 != isUpper2) caseChanges++;
+        }
+        if (caseChanges >= 3) {
+          score -= 0.30;
+          break;
+        }
+      }
+    }
+
+    return score.clamp(0.0, 1.0);
+  }
+
+  /// Evaluates formatting quality for cross-engine reconciliation.
+  /// Prefers clean word separation over fused/camelCase strings.
+  /// e.g. "Senior Consultant" (clean spaced) > "Seniorconsultant" (fused)
+  /// e.g. "Apex Healthcare" (clean spaced) > "ApexHealthcare" (fused)
+  /// e.g. "Global Medical Center" > "GlobalMedicalCenter"
+  static double scoreFormattingQuality(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return 0.0;
+    double score = 1.0;
+
+    final words = trimmed.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+
+    // Reward proper multi-word spacing for natural phrases
+    if (words.length >= 2) {
+      score += 0.30;
+    }
+
+    // Penalize fused CamelCase words (e.g. "MedicalCenter", "ApexHealthcare")
+    for (final w in words) {
+      if (RegExp(r'[a-z][A-Z]').hasMatch(w) ||
+          RegExp(r'[A-Z]{2,}[A-Z][a-z]').hasMatch(w)) {
+        score -= 0.40;
+      }
+    }
+
+    // Penalize fused words where a known compound root is glued without space
+    // (e.g. "Transplantsurgeon", "Medicalmission", "Healthcarecentre")
+    final fusedRoots = [
+      'surgeon',
+      'mission',
+      'healthcare',
+      'hospital',
+      'doctor',
+      'consultant',
+      'director',
+      'manager',
+      'engineer',
+      'technologies',
+    ];
+    for (final root in fusedRoots) {
+      for (final w in words) {
+        final wLower = w.toLowerCase();
+        if (wLower != root && wLower.endsWith(root) && wLower.length > root.length + 2) {
+          score -= 0.45;
+        }
+      }
+    }
+
+    // Penalize trailing ellipsis or cutoffs (e.g. "Shro...")
+    if (trimmed.endsWith('...') || trimmed.endsWith('..')) {
+      score -= 0.30;
+    }
+
+    // Reward Title Case or clean Capitalization
+    if (words.every((w) => w.isNotEmpty && w[0] == w[0].toUpperCase())) {
+      score += 0.15;
+    }
+
+    return score.clamp(0.0, 2.0);
+  }
 
   // ---------------------------------------------------------------------------
   // NAME CANDIDATE EVALUATION
@@ -149,6 +307,9 @@ class FieldSemanticEvaluator {
         cleanName = beforeComma;
         attachedCredentials = afterComma;
         positiveEvidence.add('Has verified credential suffix: "$afterComma"');
+      } else if (RegExp(r'^[A-Za-z]\.?$', caseSensitive: false).hasMatch(afterComma)) {
+        // Legitimate name with trailing initial e.g. "Chandra Kanthan, M"
+        positiveEvidence.add('Has personal name initial suffix: "$afterComma"');
       }
     }
 
@@ -158,7 +319,19 @@ class FieldSemanticEvaluator {
         .replaceAll(RegExp(r'[•\-\*\>👤\s,]+$'), '')
         .trim();
 
+    final alphaLetters = cleanName.replaceAll(RegExp(r'[^a-zA-Z]'), '');
+    if (alphaLetters.length < 2) {
+      rejectionReasons.add('Does not contain sufficient alphabetic characters for a person name');
+      return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
+    }
+
     double score = 0.0;
+
+    // 0. Certification Disqualification (CRITICAL)
+    if (_certificationRegExp.hasMatch(trimmed)) {
+      rejectionReasons.add('Matches certification standard (e.g. ISO, CE, GMP)');
+      return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
+    }
 
     // 1. Contact / URL / Noise Disqualification
     if (_emailRegExp.hasMatch(trimmed) || trimmed.contains('@')) {
@@ -224,23 +397,62 @@ class FieldSemanticEvaluator {
       return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
     }
 
-    // Website or email domain match
+    if (surroundingText != null &&
+        cleanName.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length == 1 &&
+        !_titleTokensRegExp.hasMatch(surroundingText) &&
+        (_companyTypeTokensRegExp.hasMatch(surroundingText) || _orgSuffixRegExp.hasMatch(surroundingText))) {
+      rejectionReasons.add('Single word forms prefix of adjacent multi-line company name ("$trimmed $surroundingText")');
+      return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
+    }
+
+    // Reject ampersands ("&") which characterize partnerships, companies, or subject lines
+    if (trimmed.contains('&')) {
+      rejectionReasons.add('Contains ampersand symbol ("&")');
+      return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
+    }
+
+    // Token analysis
+    final words = cleanName.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final wordCount = words.length;
+
+    // Website or email domain match: If cleanName matches an organization domain,
+    // it is compelling evidence of a COMPANY / ORGANIZATION, NOT a Person Name!
+    // Exception: Personal portfolio / vanity domain for individuals (e.g. "Elena Rostova" -> "elenarostova.design")
+    // when positioned immediately above a job title without any corporate suffix.
     if (website != null) {
-      final normDomain = _normalizeDomain(website);
+      final normDomain = _normalizeDomain(website).replaceAll(RegExp(r'[^a-z0-9]'), '');
       final normName = cleanName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-      if (normName.length >= 4 && normDomain.contains(normName)) {
-        rejectionReasons.add('Matches website domain ("$website")');
+      if (normName.length >= 3 && (normDomain.contains(normName) || normName.contains(normDomain))) {
+        if (wordCount == 1 || hasOrgSuffix || hasCompanyType) {
+          rejectionReasons.add('Single word or corporate name matches website domain ("$website")');
+          return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
+        }
+        if (jobTitleIndex != null && lineIndex == jobTitleIndex - 1) {
+          positiveEvidence.add('Personal portfolio domain matches cardholder name');
+        } else {
+          rejectionReasons.add('Matches corporate website domain ("$website")');
+          score -= 0.35;
+        }
       }
     }
 
+    const publicDomains = {'gmail', 'yahoo', 'hotmail', 'outlook', 'icloud', 'rediffmail', 'live'};
     for (final email in detectedEmails) {
       if (email.contains('@')) {
         final domainPart = email.split('@').last.split('.').first.toLowerCase();
+        if (publicDomains.contains(domainPart)) continue;
         final normName = cleanName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-        if (domainPart.length >= 3 && (normName == domainPart || (normName.length >= 4 && normName.contains(domainPart)))) {
-          rejectionReasons.add('Matches domain of email ("$domainPart")');
-          score -= 0.60;
-          break;
+        if (normName.length >= 3 && (domainPart.contains(normName) || normName.contains(domainPart))) {
+          if (wordCount == 1 || hasOrgSuffix || hasCompanyType) {
+            rejectionReasons.add('Single word or corporate name matches company email domain ("$domainPart")');
+            return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
+          }
+          if (jobTitleIndex != null && lineIndex == jobTitleIndex - 1) {
+            positiveEvidence.add('Personal email vanity domain matches cardholder name');
+          } else {
+            rejectionReasons.add('Matches company email domain ("$domainPart")');
+            score -= 0.35;
+          }
         }
       }
     }
@@ -270,6 +482,24 @@ class FieldSemanticEvaluator {
       rejectionReasons.add('Contains $corruptionCount corrupted / fragmented word token(s)');
     }
 
+    // Single-word check: A person name must have >= 2 words, OR an honorific, OR match an email username
+    if (wordCount == 1 && !_honorificPrefixRegExp.hasMatch(cleanName) && attachedCredentials == null) {
+      bool matchesUsername = false;
+      for (final email in detectedEmails) {
+        if (email.contains('@')) {
+          final localPart = email.split('@').first.toLowerCase();
+          if (localPart.contains(cleanName.toLowerCase())) {
+            matchesUsername = true;
+            break;
+          }
+        }
+      }
+      if (!matchesUsername) {
+        rejectionReasons.add('Single word without personal honorific or email username is likely a brand or company');
+        return _buildRejectedNameCandidate(cleanName, sourceEngine, ocrConfidence, rejectionReasons);
+      }
+    }
+
     // --- POSITIVE SIGNALS & HEURISTICS ---
 
     // Signal: Explicit label "Name: John Doe"
@@ -291,15 +521,11 @@ class FieldSemanticEvaluator {
       score += 0.30;
     }
 
-    // Token analysis
-    final words = cleanName.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-    final wordCount = words.length;
-
-    // Plausible human name token count: 2 to 4 words (or 1 with honorific)
+    // Plausible human name token count: 2 to 4 words (or 1 with honorific/username)
     if (wordCount >= 2 && wordCount <= 4) {
       positiveEvidence.add('Has natural 2-4 token human name structure');
       score += 0.30;
-    } else if (wordCount == 1 && _honorificPrefixRegExp.hasMatch(cleanName)) {
+    } else if (wordCount == 1 && (_honorificPrefixRegExp.hasMatch(cleanName) || attachedCredentials != null)) {
       positiveEvidence.add('Single word preceded by personal honorific');
       score += 0.20;
     } else if (wordCount > 5) {
@@ -329,18 +555,19 @@ class FieldSemanticEvaluator {
       }
     }
 
-    // Initials support (e.g. "A. Kumar", "K. S. Raman", "Chandra Kanthan. M", "A K Last")
-    // Do NOT give an artificial score bonus to initials over full names!
+    // Initials support (e.g. "D. S. Sharma", "A. Kumar", "K. S. Raman", "Chandra Kanthan. M")
     final hasInitials = words.any((w) =>
         RegExp(r'^[A-Z]\.?$').hasMatch(w) ||
         RegExp(r'^[A-Z]\.[A-Z]\.?$').hasMatch(w));
     if (hasInitials) {
       positiveEvidence.add('Contains standard name initial(s)');
-      // Abbreviated initial is valid, but full names beat initials when evidence exists
-      score -= 0.10;
+      if (words.length >= 2) {
+        positiveEvidence.add('Initial(s) accompanied by given/surname');
+        score += 0.10;
+      }
     } else if (wordCount >= 2 && words.every((w) => w.length >= 3)) {
       positiveEvidence.add('Fully expanded multi-character name tokens');
-      score += 0.15;
+      score += 0.20;
     }
 
     // Capitalization check: Title Case or ALL CAPS
@@ -376,6 +603,29 @@ class FieldSemanticEvaluator {
       score -= 0.30;
     }
 
+    // Garbled text & mixed alphanumeric checks (e.g. "9Word B123 Corrupted")
+    int mixedAlphaNumCount = 0;
+    for (final w in words) {
+      final clean = w.replaceAll(RegExp(r'^[^\w]+|[^\w]+$'), '');
+      if (clean.length >= 2 &&
+          clean.contains(RegExp(r'[a-zA-Z]')) &&
+          clean.contains(RegExp(r'\d')) &&
+          !RegExp(r'^\d+(?:st|nd|rd|th)$', caseSensitive: false).hasMatch(clean)) {
+        mixedAlphaNumCount++;
+      }
+    }
+    if (mixedAlphaNumCount > 0) {
+      rejectionReasons.add('Word token contains mixed digits and letters');
+      score -= (0.70 * mixedAlphaNumCount);
+    }
+
+    // Text quality evaluation
+    final textQuality = computeTextQualityScore(cleanName);
+    if (textQuality < 0.60) {
+      rejectionReasons.add('Low text quality score (${(textQuality * 100).toStringAsFixed(0)}%)');
+      score -= (1.0 - textQuality) * 0.60;
+    }
+
     // Apply Penalties from negative signals
     if (looksLikeAddress) score -= 0.50;
     if (hasPostalCode) score -= 0.60;
@@ -388,7 +638,8 @@ class FieldSemanticEvaluator {
     }
     if (corruptionCount > 0) score -= (0.20 * corruptionCount);
 
-    final semanticConfidence = score.clamp(0.0, 1.0);
+    final maxConfidence = hasInitials ? 0.88 : 1.0;
+    final semanticConfidence = score.clamp(0.0, maxConfidence);
 
     return FieldCandidate(
       field: 'fullName',
@@ -396,6 +647,7 @@ class FieldSemanticEvaluator {
       sourceEngine: sourceEngine,
       ocrConfidence: ocrConfidence,
       semanticConfidence: semanticConfidence,
+      textQualityScore: textQuality,
       positiveEvidence: positiveEvidence,
       rejectionReasons: rejectionReasons,
       spatialEvidence: {
@@ -428,10 +680,25 @@ class FieldSemanticEvaluator {
         sourceEngine: sourceEngine,
         ocrConfidence: ocrConfidence,
         semanticConfidence: 0.0,
+        textQualityScore: 0.0,
       );
     }
 
-    double score = 0.0;
+    final textQuality = computeTextQualityScore(trimmed);
+
+    final alphaLetters = trimmed.replaceAll(RegExp(r'[^a-zA-Z]'), '');
+    if (alphaLetters.length < 2) {
+      return FieldCandidate(
+        field: 'jobTitle',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Does not contain sufficient alphabetic characters for a job title'],
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
 
     // Explicit label e.g. "Title: Managing Director"
     final labelMatch = RegExp(r'^(?:designation|job\s+title|title|role)\s*[:\-]\s*(.+)$', caseSensitive: false)
@@ -440,37 +707,89 @@ class FieldSemanticEvaluator {
     if (labelMatch != null) {
       cleanTitle = labelMatch.group(1)!.trim();
       positiveEvidence.add('Has explicit "Title:" prefix');
+    }
+
+    final lowerTitle = cleanTitle.toLowerCase();
+    final bool hasTitleMatch = _titleTokensRegExp.hasMatch(cleanTitle);
+    final words = lowerTitle.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final bool hasFusedOccupational = words.any((w) => [
+          'surgeon',
+          'physician',
+          'doctor',
+          'consultant',
+          'director',
+          'manager',
+          'engineer',
+          'technologist',
+          'nephrologist',
+          'urologist',
+          'psychologist',
+          'radiologist',
+          'pathologist',
+          'pediatrician',
+        ].any((root) => w.contains(root)));
+
+    // Critical: If no title keyword, no fused occupational root, and no explicit label,
+    // a meaningless arbitrary string MUST NOT be scored as a job title!
+    if (labelMatch == null && !hasTitleMatch && !hasFusedOccupational) {
+      rejectionReasons.add('No occupational title keyword or structure recognized');
+      return FieldCandidate(
+        field: 'jobTitle',
+        value: cleanTitle,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        positiveEvidence: positiveEvidence,
+        rejectionReasons: rejectionReasons,
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    double score = 0.0;
+    if (labelMatch != null) {
       score += 0.50;
     }
 
     // Keyword match
-    if (_titleTokensRegExp.hasMatch(cleanTitle)) {
+    if (hasTitleMatch || hasFusedOccupational) {
       positiveEvidence.add('Matches known occupational / title keywords');
       score += 0.40;
 
-      final words = cleanTitle.toLowerCase().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
-      if (words.length <= 4 && words.every((w) => _titleTokensRegExp.hasMatch(w) || _titleModifierRegExp.hasMatch(w))) {
+      if (_titleTokensRegExp.hasMatch(cleanTitle) ||
+          (words.length <= 4 && words.every((w) => _titleTokensRegExp.hasMatch(w) || _titleModifierRegExp.hasMatch(w)))) {
         positiveEvidence.add('Pure occupational title phrase');
         score += 0.35;
       }
     }
 
-    // Proximity to person name
-    if (personIndex != null && lineIndex == personIndex + 1) {
+    // Proximity to person name (only if occupational indicators exist!)
+    if (personIndex != null && lineIndex == personIndex + 1 && (hasTitleMatch || hasFusedOccupational)) {
       positiveEvidence.add('Positioned immediately beneath person name');
       score += 0.30;
     }
 
-    // Penalize if contains org suffix (Ltd, LLC, Inc)
+    // Penalize if contains org suffix (Ltd, LLC, Inc) - unless part of a "to/of <entity>" title modifier
     if (_orgSuffixRegExp.hasMatch(cleanTitle)) {
-      rejectionReasons.add('Contains corporate legal entity suffix');
-      score -= 0.50;
+      final isTitleToEntity = RegExp(
+        r'\b(?:to|of|for|in|at)\s+(?:the\s+)?(?:government|govt|board|council|ministry|department)\b',
+        caseSensitive: false,
+      ).hasMatch(cleanTitle);
+      if (!isTitleToEntity) {
+        rejectionReasons.add('Contains corporate legal entity suffix');
+        score -= 0.50;
+      }
     }
 
     // Penalize if address
     if (isLocationOrAddressLine(cleanTitle)) {
       rejectionReasons.add('Contains address or location indicators');
       score -= 0.60;
+    }
+
+    // Text quality penalty
+    if (textQuality < 0.60) {
+      score -= (1.0 - textQuality) * 0.40;
     }
 
     final semanticConfidence = score.clamp(0.0, 1.0);
@@ -480,6 +799,7 @@ class FieldSemanticEvaluator {
       sourceEngine: sourceEngine,
       ocrConfidence: ocrConfidence,
       semanticConfidence: semanticConfidence,
+      textQualityScore: textQuality,
       positiveEvidence: positiveEvidence,
       rejectionReasons: rejectionReasons,
       spatialEvidence: {'lineIndex': lineIndex},
@@ -495,6 +815,7 @@ class FieldSemanticEvaluator {
     required String sourceEngine,
     int lineIndex = 0,
     String? website,
+    String? personName,
     List<String> emails = const [],
     double ocrConfidence = 0.90,
   }) {
@@ -509,10 +830,105 @@ class FieldSemanticEvaluator {
         sourceEngine: sourceEngine,
         ocrConfidence: ocrConfidence,
         semanticConfidence: 0.0,
+        textQualityScore: 0.0,
       );
     }
 
-    double score = 0.0;
+    final textQuality = computeTextQualityScore(trimmed);
+
+    if (personName != null && trimmed.toLowerCase() == personName.toLowerCase()) {
+      return FieldCandidate(
+        field: 'company',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Line is the person name, not a company name'],
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    final alphaLetters = trimmed.replaceAll(RegExp(r'[^a-zA-Z]'), '');
+    if (alphaLetters.length < 2) {
+      return FieldCandidate(
+        field: 'company',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Does not contain sufficient alphabetic characters for a company name'],
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    // Explicit rejection: A line containing an email, website URL, phone digits, or marketing slogan is not a company
+    if (trimmed.contains('@')) {
+      return FieldCandidate(
+        field: 'company',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Line is an email address, not a company name'],
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    if (RegExp(r'(?:https?:\/\/|www\.)\S+', caseSensitive: false).hasMatch(trimmed)) {
+      return FieldCandidate(
+        field: 'company',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Line is a URL/website, not a company name'],
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 7 && (digits.length / trimmed.length) > 0.45) {
+      return FieldCandidate(
+        field: 'company',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Line is primarily a phone or fax number'],
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    if (_certificationRegExp.hasMatch(trimmed)) {
+      return FieldCandidate(
+        field: 'company',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Line is a quality, management or statutory certification (e.g. ISO, CE, GMP)'],
+        spatialEvidence: {'lineIndex': lineIndex, 'isCertification': true},
+      );
+    }
+
+    if (_sloganPatterns.any((p) => p.hasMatch(trimmed))) {
+      return FieldCandidate(
+        field: 'company',
+        value: trimmed,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        rejectionReasons: const ['Line matches a marketing slogan or tagline'],
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
 
     // Explicit label e.g. "Company: Medindia"
     final labelMatch = RegExp(r'^(?:company|organization|org)\s*[:\-]\s*(.+)$', caseSensitive: false)
@@ -521,17 +937,43 @@ class FieldSemanticEvaluator {
     if (labelMatch != null) {
       cleanCompany = labelMatch.group(1)!.trim();
       positiveEvidence.add('Has explicit "Company:" prefix');
+    }
+
+    final words = cleanCompany.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final bool hasOrgSuffix = _orgSuffixRegExp.hasMatch(cleanCompany);
+    final bool hasCompanyType = _companyTypeTokensRegExp.hasMatch(cleanCompany);
+    final bool hasDomainMatch = (website != null && cleanCompany.length >= 4 && _normalizeDomain(website).contains(cleanCompany.toLowerCase())) ||
+        emails.any((e) => e.contains('@') && cleanCompany.length >= 4 && e.toLowerCase().contains(cleanCompany.toLowerCase()));
+
+    // Reject single isolated words that have no corporate suffix, category keyword, or domain match
+    if (words.length == 1 && labelMatch == null && !hasOrgSuffix && !hasCompanyType && !hasDomainMatch) {
+      rejectionReasons.add('Single isolated word lacks corporate or institutional keywords');
+      return FieldCandidate(
+        field: 'company',
+        value: cleanCompany,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        positiveEvidence: positiveEvidence,
+        rejectionReasons: rejectionReasons,
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    double score = 0.0;
+    if (labelMatch != null) {
       score += 0.50;
     }
 
     // Corporate entity suffix (Ltd, Pvt Ltd, Inc, Corp, LLC)
-    if (_orgSuffixRegExp.hasMatch(cleanCompany)) {
+    if (hasOrgSuffix) {
       positiveEvidence.add('Contains formal corporate suffix (Ltd, Inc, LLC)');
       score += 0.45;
     }
 
     // Industry / organization category
-    if (_companyTypeTokensRegExp.hasMatch(cleanCompany)) {
+    if (hasCompanyType) {
       positiveEvidence.add('Contains organization category keyword');
       score += 0.35;
     }
@@ -556,17 +998,33 @@ class FieldSemanticEvaluator {
           score += 0.40;
           break;
         }
+
+        // Also check if company words appear in email local-part (e.g. chandrumediequip@gmail.com)
+        final localPart = email.split('@').first.toLowerCase();
+        if (normComp.length >= 5 && (localPart.contains(normComp) || (localPart.length >= 6 && normComp.contains(localPart)))) {
+          positiveEvidence.add('Matches company name in email local-part ("$localPart")');
+          score += 0.35;
+          break;
+        }
       }
     }
 
-    // Top branding position
-    if (lineIndex == 0) {
+    // Explicit preference: Multi-word entity with organization/industry category outscores standalone single-word brand
+    if (words.length >= 2 && (hasCompanyType || hasOrgSuffix)) {
+      positiveEvidence.add('Multi-word organizational entity with category indicators');
+      score += 0.25;
+    } else if (words.length == 1 && !hasOrgSuffix && !hasCompanyType) {
+      // Single-word brand penalty when competing with full legal entities
+      score -= 0.10;
+    }
+
+    // Top branding position - only for established multi-word phrases or lines with category/suffix
+    if (lineIndex == 0 && (hasOrgSuffix || hasCompanyType || words.length >= 2 || hasDomainMatch)) {
       positiveEvidence.add('Positioned at top of card (line 0)');
       score += 0.20;
     }
 
     // Well-capitalized company / organization name structure
-    final words = cleanCompany.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
     if (words.isNotEmpty && words.length <= 4) {
       final capitalized = words.where((w) => w[0].toUpperCase() == w[0]).length;
       if (capitalized == words.length) {
@@ -575,22 +1033,57 @@ class FieldSemanticEvaluator {
       }
     }
 
-    // Penalize if it's a known job title (e.g. "Chief Technology Officer")
-    if (_titleTokensRegExp.hasMatch(cleanCompany)) {
+    // Disqualify if it's an occupational job title (e.g. "Software Engineer", "Chief Technology Officer")
+    if (_titleTokensRegExp.hasMatch(cleanCompany) && !hasOrgSuffix) {
       rejectionReasons.add('Matches job title pattern ("$cleanCompany")');
-      score -= 0.60;
+      return FieldCandidate(
+        field: 'company',
+        value: cleanCompany,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        positiveEvidence: positiveEvidence,
+        rejectionReasons: rejectionReasons,
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
     }
 
-    // Penalize if it's a person name with personal honorific
+    // Disqualify if it's a person name with personal honorific
     if (_honorificPrefixRegExp.hasMatch(cleanCompany)) {
       rejectionReasons.add('Starts with personal honorific');
-      score -= 0.60;
+      return FieldCandidate(
+        field: 'company',
+        value: cleanCompany,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        positiveEvidence: positiveEvidence,
+        rejectionReasons: rejectionReasons,
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
     }
 
-    // Penalize if address
+    // Disqualify if it's a location, street, or address line
     if (isLocationOrAddressLine(cleanCompany)) {
-      rejectionReasons.add('Contains address indicators');
-      score -= 0.60;
+      rejectionReasons.add('Contains address or location indicators');
+      return FieldCandidate(
+        field: 'company',
+        value: cleanCompany,
+        sourceEngine: sourceEngine,
+        ocrConfidence: ocrConfidence,
+        semanticConfidence: 0.0,
+        textQualityScore: textQuality,
+        positiveEvidence: positiveEvidence,
+        rejectionReasons: rejectionReasons,
+        spatialEvidence: {'lineIndex': lineIndex},
+      );
+    }
+
+    // Text quality penalty
+    if (textQuality < 0.60) {
+      score -= (1.0 - textQuality) * 0.40;
     }
 
     final semanticConfidence = score.clamp(0.0, 1.0);
@@ -600,6 +1093,7 @@ class FieldSemanticEvaluator {
       sourceEngine: sourceEngine,
       ocrConfidence: ocrConfidence,
       semanticConfidence: semanticConfidence,
+      textQualityScore: textQuality,
       positiveEvidence: positiveEvidence,
       rejectionReasons: rejectionReasons,
       spatialEvidence: {'lineIndex': lineIndex},
@@ -622,6 +1116,7 @@ class FieldSemanticEvaluator {
         sourceEngine: sourceEngine,
         ocrConfidence: ocrConfidence,
         semanticConfidence: 0.0,
+        textQualityScore: 0.0,
       );
     }
 
@@ -634,7 +1129,9 @@ class FieldSemanticEvaluator {
       score += 0.35;
     }
 
-    if (RegExp(r'\b\d{5,6}\b').hasMatch(combined) ||
+    if (RegExp(r'\b\d{4,6}\b').hasMatch(combined) ||
+        RegExp(r'\b\d{3}\s*\d{3}\b').hasMatch(combined) ||
+        RegExp(r'\b[A-Za-z]+[-–]\s*\d{4,6}\b').hasMatch(combined) ||
         RegExp(r'\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b', caseSensitive: false).hasMatch(combined)) {
       positiveEvidence.add('Contains valid postal PIN / ZIP code');
       score += 0.30;
@@ -645,6 +1142,7 @@ class FieldSemanticEvaluator {
       score += 0.20;
     }
 
+    final textQuality = computeTextQualityScore(combined);
     final semanticConfidence = score.clamp(0.0, 1.0);
     return FieldCandidate(
       field: 'address',
@@ -652,6 +1150,7 @@ class FieldSemanticEvaluator {
       sourceEngine: sourceEngine,
       ocrConfidence: ocrConfidence,
       semanticConfidence: semanticConfidence,
+      textQualityScore: textQuality,
       positiveEvidence: positiveEvidence,
     );
   }
@@ -667,10 +1166,30 @@ class FieldSemanticEvaluator {
     // Exclude personal honorifics
     if (_honorificPrefixRegExp.hasMatch(line.trim())) return false;
 
+    // Exclude certifications (e.g. ISO 9001, CE, GMP)
+    if (_certificationRegExp.hasMatch(lower)) return false;
+
     // Exclude occupational titles like "Licensed Real Estate Broker / Agent"
     if (lower.contains('real estate') && (lower.contains('broker') || lower.contains('agent') || lower.contains('realtor') || lower.contains('consultant'))) {
       return false;
     }
+
+    // Exclude formal corporate names with legal entity suffixes
+    if (_orgSuffixRegExp.hasMatch(lower)) return false;
+
+    // Exclude judicial, governmental, institutional and public bodies
+    if (RegExp(r'\b(government|govt|court|high\s+court|supreme\s+court|ministry|council|authority|board|tribunal|department|commission)\b', caseSensitive: false).hasMatch(lower)) {
+      return false;
+    }
+
+    // Exclude clear occupational titles
+    if (_titleTokensRegExp.hasMatch(lower) && !lower.contains('road') && !lower.contains('street') && !lower.contains('office') && !lower.contains('building')) {
+      return false;
+    }
+
+    // Address lines must contain at least 2 alphabetic characters (rejects raw phone numbers/digits)
+    final alphaLetters = lower.replaceAll(RegExp(r'[^a-z]'), '');
+    if (alphaLetters.length < 2) return false;
 
     if (_addressTokensRegExp.hasMatch(lower)) return true;
 
@@ -700,6 +1219,20 @@ class FieldSemanticEvaluator {
       if (p.hasMatch(lower)) return true;
     }
     return false;
+  }
+
+  /// Checks whether a line represents a company, job title, person name, or slogan,
+  /// preventing it from being accidentally merged into an address cluster.
+  static bool isLikelyOtherEntity(String line) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) return false;
+    return _orgSuffixRegExp.hasMatch(trimmed) ||
+        _companyTypeTokensRegExp.hasMatch(trimmed) ||
+        _titleTokensRegExp.hasMatch(trimmed) ||
+        _honorificPrefixRegExp.hasMatch(trimmed) ||
+        _credentialTokenRegExp.hasMatch(trimmed) ||
+        isSlogan(trimmed) ||
+        evaluateNameCandidate(rawLine: trimmed, sourceEngine: 'OtherEntityGuard').semanticConfidence >= 0.40;
   }
 
   // ---------------------------------------------------------------------------
@@ -738,20 +1271,53 @@ class FieldSemanticEvaluator {
     }
 
     final resolvedPhones = <FieldCandidate>[];
-    final seenNormalizedPhones = <String>{};
 
     for (final cand in [...primaryPhones, ...secondaryPhones]) {
       // Check if duplicate of already seen phone
-      bool isDup = false;
-      for (final seen in seenNormalizedPhones) {
-        if (PhoneOcrRecovery.areEquivalentPhones(cand.normalized, seen)) {
-          isDup = true;
+      int existingIndex = -1;
+      for (int i = 0; i < resolvedPhones.length; i++) {
+        final existingNorm = resolvedPhones[i].spatialEvidence['normalized'] as String? ?? '';
+        final existingDigits = existingNorm.replaceAll(RegExp(r'\D'), '');
+        final candDigits = cand.normalized.replaceAll(RegExp(r'\D'), '');
+        final bool isEquivalent = PhoneOcrRecovery.areEquivalentPhones(cand.normalized, existingNorm);
+        final bool isPrefixOf = (existingDigits.length >= 8 && candDigits.length >= 8) &&
+            (candDigits.startsWith(existingDigits) || existingDigits.startsWith(candDigits));
+
+        if (isEquivalent || isPrefixOf) {
+          existingIndex = i;
           break;
         }
       }
-      if (isDup) continue;
 
-      seenNormalizedPhones.add(cand.normalized);
+      if (existingIndex != -1) {
+        // If the new candidate has more digits (e.g. recovered missing digit), replace the shorter one!
+        final existingDigits = (resolvedPhones[existingIndex].spatialEvidence['normalized'] as String? ?? '')
+            .replaceAll(RegExp(r'\D'), '');
+        final candDigits = cand.normalized.replaceAll(RegExp(r'\D'), '');
+        if (candDigits.length > existingDigits.length) {
+          final existingPhone = resolvedPhones[existingIndex];
+          resolvedPhones[existingIndex] = FieldCandidate(
+            field: 'phone',
+            value: cand.formatted,
+            sourceEngine: 'Recovered (${existingPhone.sourceEngine} & ${cand.sourceEngine})',
+            ocrConfidence: max(existingPhone.ocrConfidence, cand.confidence),
+            semanticConfidence: max(existingPhone.semanticConfidence, cand.confidence),
+            spatialEvidence: {
+              if (cand.label != null || existingPhone.spatialEvidence['label'] != null)
+                'label': cand.label ?? existingPhone.spatialEvidence['label'],
+              'normalized': cand.normalized,
+              'wasSplitJoined': cand.wasSplitJoined,
+              'hasCharacterCorrection': cand.hasCharacterCorrection,
+              'recoveryUpgraded': true,
+            },
+            positiveEvidence: [
+              ...existingPhone.positiveEvidence,
+              'Recovered missing digits from ${cand.sourceEngine}',
+            ],
+          );
+        }
+        continue;
+      }
 
       // Check cross-engine agreement
       final fromPrimary = primaryPhones.any(
@@ -766,7 +1332,7 @@ class FieldSemanticEvaluator {
           : (fromPrimary ? primaryEngineName : secondaryEngineName);
 
       if (fromPrimary && fromSecondary) {
-        agreedSignals.add('phone: ${cand.formatted}');
+        agreedSignals.add('phone');
       }
 
       resolvedPhones.add(FieldCandidate(
@@ -801,16 +1367,19 @@ class FieldSemanticEvaluator {
     );
 
     if (kDebugMode) {
-      debugPrint('[$primaryEngineName] Raw email candidates: '
-          '${primaryEmailCandidates.isEmpty ? "none" : primaryEmailCandidates.map((e) => e.email).join(", ")}');
-      debugPrint('[$secondaryEngineName] Raw email candidates: '
-          '${secondaryEmailCandidates.isEmpty ? "none" : secondaryEmailCandidates.map((e) => e.email).join(", ")}');
+      debugPrint('[$primaryEngineName] Email candidates found: ${primaryEmailCandidates.length}');
+      debugPrint('[$secondaryEngineName] Email candidates found: ${secondaryEmailCandidates.length}');
     }
 
     final resolvedEmails = <FieldCandidate>[];
     final seenNormalizedEmails = <String>{};
 
-    for (final cand in [...primaryEmailCandidates, ...secondaryEmailCandidates]) {
+    final combinedEmailCandidates = EmailOcrRecovery.suppressEmailFragments([
+      ...primaryEmailCandidates,
+      ...secondaryEmailCandidates,
+    ]);
+
+    for (final cand in combinedEmailCandidates) {
       if (seenNormalizedEmails.contains(cand.normalized)) continue;
       seenNormalizedEmails.add(cand.normalized);
 
@@ -821,7 +1390,7 @@ class FieldSemanticEvaluator {
           : (fromPrimary ? primaryEngineName : secondaryEngineName);
 
       if (fromPrimary && fromSecondary) {
-        agreedSignals.add('email: ${cand.email}');
+        agreedSignals.add('email');
       }
 
       resolvedEmails.add(FieldCandidate(
@@ -870,7 +1439,7 @@ class FieldSemanticEvaluator {
           : (isFromPrimary ? primaryEngineName : secondaryEngineName);
 
       if (isFromPrimary && isFromSecondary) {
-        agreedSignals.add('website: $w');
+        agreedSignals.add('website');
       }
 
       resolvedWebsites.add(FieldCandidate(
@@ -903,31 +1472,21 @@ class FieldSemanticEvaluator {
       ),
     );
 
-    FieldCandidate? resolvedTitle;
-    if (primaryTitleCand != null && secondaryTitleCand != null) {
-      final normP = primaryTitleCand.value.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
-      final normS = secondaryTitleCand.value.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
-      if (normP == normS && normP.isNotEmpty) {
-        agreedSignals.add('jobTitle: ${primaryTitleCand.value}');
-        resolvedTitle = secondaryTitleCand;
-      } else if (secondaryTitleCand.semanticConfidence > primaryTitleCand.semanticConfidence) {
-        resolvedTitle = secondaryTitleCand;
-        if (primaryTitleCand.value.isNotEmpty && primaryTitleCand.value != secondaryTitleCand.value) {
-          alternatives['jobTitle'] = [primaryTitleCand.value];
-        }
-      } else {
-        resolvedTitle = primaryTitleCand;
-        if (secondaryTitleCand.value.isNotEmpty && secondaryTitleCand.value != primaryTitleCand.value) {
-          alternatives['jobTitle'] = [secondaryTitleCand.value];
-        }
-      }
-    } else {
-      resolvedTitle = primaryTitleCand ?? secondaryTitleCand;
-    }
+    final bool primaryIsPaddle = primaryEngineName.toLowerCase().contains('paddle');
+    final bool secondaryIsPaddle = secondaryEngineName.toLowerCase().contains('paddle');
 
-    if (resolvedTitle != null && resolvedTitle.semanticConfidence < 0.30) {
-      resolvedTitle = null;
-    }
+    final FieldCandidate? resolvedTitle = _arbitrateCandidateField(
+      fieldName: 'jobTitle',
+      candP: primaryTitleCand,
+      candS: secondaryTitleCand,
+      primaryIsPaddle: primaryIsPaddle,
+      secondaryIsPaddle: secondaryIsPaddle,
+      agreedSignals: agreedSignals,
+      diagnosticNotes: diagnosticNotes,
+      alternatives: alternatives,
+      minAcceptableSemanticConfidence: 0.30,
+      minAcceptableTextQuality: 0.40,
+    );
 
     // 5. EXTRACT & RESOLVE NAME CANDIDATES (aware of job title adjacency)
     final primaryJobTitleIndex = primaryTitleCand?.spatialEvidence['lineIndex'] as int?;
@@ -941,6 +1500,7 @@ class FieldSemanticEvaluator {
         lineIndex: idx,
         totalLines: primaryLines.length,
         jobTitleIndex: primaryJobTitleIndex,
+        surroundingText: idx < primaryLines.length - 1 ? primaryLines[idx + 1] : null,
         website: topWebsite,
         detectedEmails: allEmails,
       ),
@@ -954,148 +1514,177 @@ class FieldSemanticEvaluator {
         lineIndex: idx,
         totalLines: secondaryLines.length,
         jobTitleIndex: secondaryJobTitleIndex,
+        surroundingText: idx < secondaryLines.length - 1 ? secondaryLines[idx + 1] : null,
         website: topWebsite,
         detectedEmails: allEmails,
       ),
     );
 
-    FieldCandidate? resolvedName;
-
-    if (primaryNameCand != null && secondaryNameCand != null) {
-      final normP = _normalizeName(primaryNameCand.value);
-      final normS = _normalizeName(secondaryNameCand.value);
-
-      if (normP == normS && normP.isNotEmpty) {
-        // Both engines agree on the same person name!
-        agreedSignals.add('fullName: ${primaryNameCand.value}');
-        resolvedName = FieldCandidate(
-          field: 'fullName',
-          value: secondaryNameCand.value, // prefer clean casing
-          sourceEngine: 'Agreed ($primaryEngineName & $secondaryEngineName)',
-          ocrConfidence: max(primaryNameCand.ocrConfidence, secondaryNameCand.ocrConfidence),
-          semanticConfidence: min(1.0, max(primaryNameCand.semanticConfidence, secondaryNameCand.semanticConfidence) + 0.15),
-          positiveEvidence: [...primaryNameCand.positiveEvidence, 'Both engines independently recognized name'],
-        );
-      } else {
-        // Disagreement: Compare candidate semantic confidence directly!
-        // NEVER let global engine score dictate this field!
-        // First check if one candidate is an abbreviation/initial of the other (e.g. "Sonia Mathew" vs "Sonia M.")
-        final bool pHasInitials = primaryNameCand.value
-            .split(RegExp(r'\s+'))
-            .any((w) => RegExp(r'^[A-Z]\.?$').hasMatch(w));
-        final bool sHasInitials = secondaryNameCand.value
-            .split(RegExp(r'\s+'))
-            .any((w) => RegExp(r'^[A-Z]\.?$').hasMatch(w));
-
-        if (!pHasInitials && sHasInitials && primaryNameCand.isTrustworthy) {
-          // Primary is full unabbreviated name while secondary has initials -> prefer primary!
-          resolvedName = primaryNameCand;
-          diagnosticNotes.add(
-              'Selected full unabbreviated Name "${primaryNameCand.value}" from ${primaryNameCand.sourceEngine} '
-              'over abbreviated candidate "${secondaryNameCand.value}" from ${secondaryNameCand.sourceEngine}');
-          alternatives['fullName'] = [secondaryNameCand.value];
-        } else if (pHasInitials && !sHasInitials && secondaryNameCand.isTrustworthy) {
-          // Secondary is full unabbreviated name while primary has initials -> prefer secondary!
-          resolvedName = secondaryNameCand;
-          diagnosticNotes.add(
-              'Selected full unabbreviated Name "${secondaryNameCand.value}" from ${secondaryNameCand.sourceEngine} '
-              'over abbreviated candidate "${primaryNameCand.value}" from ${primaryNameCand.sourceEngine}');
-          alternatives['fullName'] = [primaryNameCand.value];
-        } else if (secondaryNameCand.semanticConfidence > primaryNameCand.semanticConfidence) {
-          resolvedName = secondaryNameCand;
-          diagnosticNotes.add(
-              'Selected Name from ${secondaryNameCand.sourceEngine} (semConf: ${(secondaryNameCand.semanticConfidence * 100).toStringAsFixed(0)}%) '
-              'over ${primaryNameCand.sourceEngine} candidate "${primaryNameCand.value}" (semConf: ${(primaryNameCand.semanticConfidence * 100).toStringAsFixed(0)}%)');
-          if (primaryNameCand.value.isNotEmpty && primaryNameCand.value != secondaryNameCand.value) {
-            alternatives['fullName'] = [primaryNameCand.value];
-          }
-        } else {
-          resolvedName = primaryNameCand;
-          diagnosticNotes.add(
-              'Selected Name from ${primaryNameCand.sourceEngine} (semConf: ${(primaryNameCand.semanticConfidence * 100).toStringAsFixed(0)}%) '
-              'over ${secondaryNameCand.sourceEngine} candidate "${secondaryNameCand.value}" (semConf: ${(secondaryNameCand.semanticConfidence * 100).toStringAsFixed(0)}%)');
-          if (secondaryNameCand.value.isNotEmpty && secondaryNameCand.value != primaryNameCand.value) {
-            alternatives['fullName'] = [secondaryNameCand.value];
-          }
-        }
-      }
-    } else {
-      resolvedName = primaryNameCand ?? secondaryNameCand;
-    }
-
-    // Zero-hallucination guard: If winning candidate semantic confidence < 0.35, leave Name empty!
-    if (resolvedName != null && !resolvedName.isTrustworthy) {
-      diagnosticNotes.add('Zero-hallucination rule: Name candidate "${resolvedName.value}" discarded (confidence below threshold: ${(resolvedName.semanticConfidence * 100).toStringAsFixed(0)}%)');
-      resolvedName = null;
-    }
+    final FieldCandidate? resolvedName = _arbitrateCandidateField(
+      fieldName: 'fullName',
+      candP: primaryNameCand,
+      candS: secondaryNameCand,
+      primaryIsPaddle: primaryIsPaddle,
+      secondaryIsPaddle: secondaryIsPaddle,
+      agreedSignals: agreedSignals,
+      diagnosticNotes: diagnosticNotes,
+      alternatives: alternatives,
+      minAcceptableSemanticConfidence: 0.35,
+      minAcceptableTextQuality: 0.50,
+      isNameField: true,
+    );
 
     // 6. EXTRACT & RESOLVE COMPANY
     final primaryCompanyCand = _findBestCandidateInLines(
       primaryLines,
+      evaluateAdjacentPairs: true,
       evaluator: (line, idx) => evaluateCompanyCandidate(
         rawLine: line,
         sourceEngine: primaryEngineName,
         lineIndex: idx,
         website: topWebsite,
+        personName: resolvedName?.value,
         emails: allEmails,
       ),
     );
 
     final secondaryCompanyCand = _findBestCandidateInLines(
       secondaryLines,
+      evaluateAdjacentPairs: true,
       evaluator: (line, idx) => evaluateCompanyCandidate(
         rawLine: line,
         sourceEngine: secondaryEngineName,
         lineIndex: idx,
         website: topWebsite,
+        personName: resolvedName?.value,
         emails: allEmails,
       ),
     );
 
-    FieldCandidate? resolvedCompany;
-    if (primaryCompanyCand != null && secondaryCompanyCand != null) {
-      final normP = primaryCompanyCand.value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-      final normS = secondaryCompanyCand.value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
-      if (normP == normS && normP.isNotEmpty) {
-        agreedSignals.add('company: ${primaryCompanyCand.value}');
-        resolvedCompany = secondaryCompanyCand;
-      } else if (secondaryCompanyCand.semanticConfidence > primaryCompanyCand.semanticConfidence) {
-        resolvedCompany = secondaryCompanyCand;
-        if (primaryCompanyCand.value.isNotEmpty && primaryCompanyCand.value != secondaryCompanyCand.value) {
-          alternatives['company'] = [primaryCompanyCand.value];
-        }
-      } else {
-        resolvedCompany = primaryCompanyCand;
-        if (secondaryCompanyCand.value.isNotEmpty && secondaryCompanyCand.value != primaryCompanyCand.value) {
-          alternatives['company'] = [secondaryCompanyCand.value];
-        }
-      }
-    } else {
-      resolvedCompany = primaryCompanyCand ?? secondaryCompanyCand;
-    }
+    final FieldCandidate? resolvedCompany = _arbitrateCandidateField(
+      fieldName: 'company',
+      candP: primaryCompanyCand,
+      candS: secondaryCompanyCand,
+      primaryIsPaddle: primaryIsPaddle,
+      secondaryIsPaddle: secondaryIsPaddle,
+      agreedSignals: agreedSignals,
+      diagnosticNotes: diagnosticNotes,
+      alternatives: alternatives,
+      minAcceptableSemanticConfidence: 0.30,
+      minAcceptableTextQuality: 0.45,
+    );
 
-    if (resolvedCompany != null && resolvedCompany.semanticConfidence < 0.30) {
-      resolvedCompany = null;
-    }
-
-    // 7. EXTRACT & RESOLVE ADDRESS
+    // 7. EXTRACT & RESOLVE ADDRESS (Cross-engine multi-line clustering & merging)
     final primaryAddrLines = _collectAddressLines(primaryLines, resolvedName?.value, resolvedCompany?.value, resolvedTitle?.value);
     final secondaryAddrLines = _collectAddressLines(secondaryLines, resolvedName?.value, resolvedCompany?.value, resolvedTitle?.value);
 
     final primaryAddrCand = evaluateAddressCandidate(addressLines: primaryAddrLines, sourceEngine: primaryEngineName);
     final secondaryAddrCand = evaluateAddressCandidate(addressLines: secondaryAddrLines, sourceEngine: secondaryEngineName);
 
-    FieldCandidate? resolvedAddress;
-    if (primaryAddrCand.value.isNotEmpty && secondaryAddrCand.value.isNotEmpty) {
-      if (secondaryAddrCand.semanticConfidence > primaryAddrCand.semanticConfidence) {
-        resolvedAddress = secondaryAddrCand;
-        alternatives['address'] = [primaryAddrCand.value];
-      } else {
-        resolvedAddress = primaryAddrCand;
-        alternatives['address'] = [secondaryAddrCand.value];
+    // Merge complementary address lines from both engines
+    final mergedAddrLines = <String>[];
+    final seenNormAddr = <String>[];
+
+    void addUniqueAddressLine(String line) {
+      final trimmed = line.trim();
+      if (trimmed.isEmpty) return;
+      final norm = trimmed.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      if (norm.isEmpty) return;
+
+      bool isSubsumed = false;
+      for (int i = 0; i < seenNormAddr.length; i++) {
+        final existing = seenNormAddr[i];
+        if (existing == norm) {
+          isSubsumed = true;
+          break;
+        }
+        if (existing.contains(norm) && (existing.length - norm.length) < 25) {
+          isSubsumed = true;
+          break;
+        }
+        if (norm.contains(existing) && (norm.length - existing.length) < 25) {
+          seenNormAddr[i] = norm;
+          mergedAddrLines[i] = trimmed;
+          isSubsumed = true;
+          break;
+        }
       }
-    } else {
-      resolvedAddress = primaryAddrCand.value.isNotEmpty ? primaryAddrCand : (secondaryAddrCand.value.isNotEmpty ? secondaryAddrCand : null);
+      if (!isSubsumed) {
+        seenNormAddr.add(norm);
+        mergedAddrLines.add(trimmed);
+      }
+    }
+
+    for (final l in primaryAddrLines) {
+      addUniqueAddressLine(l);
+    }
+    for (final l in secondaryAddrLines) {
+      addUniqueAddressLine(l);
+    }
+
+    FieldCandidate? resolvedAddress;
+    if (mergedAddrLines.isNotEmpty) {
+      final bool hasPrimary = primaryAddrLines.isNotEmpty;
+      final bool hasSecondary = secondaryAddrLines.isNotEmpty;
+      final String source;
+      if (hasPrimary && hasSecondary) {
+        agreedSignals.add('address');
+        source = 'Both ($primaryEngineName & $secondaryEngineName)';
+      } else if (hasPrimary) {
+        source = primaryEngineName;
+      } else {
+        source = secondaryEngineName;
+      }
+
+      final mergedCand = evaluateAddressCandidate(
+        addressLines: mergedAddrLines,
+        sourceEngine: source,
+      );
+
+      resolvedAddress = mergedCand;
+
+      if (hasPrimary && hasSecondary && primaryAddrCand.value != secondaryAddrCand.value) {
+        alternatives['address'] = [
+          if (primaryAddrCand.value.isNotEmpty && primaryAddrCand.value != mergedCand.value)
+            primaryAddrCand.value,
+          if (secondaryAddrCand.value.isNotEmpty && secondaryAddrCand.value != mergedCand.value)
+            secondaryAddrCand.value,
+        ];
+      }
+    }
+
+    // 8. PRESERVE UNCLASSIFIED LINES (Part 15)
+    final claimedLineTexts = <String>{};
+    if (resolvedName != null) claimedLineTexts.add(resolvedName.value.toLowerCase());
+    if (resolvedTitle != null) claimedLineTexts.add(resolvedTitle.value.toLowerCase());
+    if (resolvedCompany != null) claimedLineTexts.add(resolvedCompany.value.toLowerCase());
+    if (resolvedAddress != null) {
+      for (final part in resolvedAddress.value.split(',')) {
+        claimedLineTexts.add(part.trim().toLowerCase());
+      }
+    }
+    for (final p in resolvedPhones) {
+      claimedLineTexts.add(p.value.toLowerCase());
+    }
+    for (final e in resolvedEmails) {
+      claimedLineTexts.add(e.value.toLowerCase());
+    }
+    for (final w in resolvedWebsites) {
+      claimedLineTexts.add(w.value.toLowerCase());
+    }
+
+    final unclassified = <String>[];
+    final seenUnclassified = <String>{};
+    for (final line in [...primaryLines, ...secondaryLines]) {
+      final trimmed = line.trim();
+      final lower = trimmed.toLowerCase();
+      if (trimmed.isEmpty) continue;
+      if (isSlogan(trimmed)) continue;
+      if (_emailRegExp.hasMatch(trimmed) || _phoneRegExp.hasMatch(trimmed)) continue;
+      if (claimedLineTexts.any((c) => lower == c || lower.contains(c) || c.contains(lower))) continue;
+      if (seenUnclassified.contains(lower)) continue;
+      seenUnclassified.add(lower);
+      unclassified.add(trimmed);
     }
 
     return FieldResolutionResult(
@@ -1109,6 +1698,7 @@ class FieldSemanticEvaluator {
       agreedSignals: agreedSignals,
       alternatives: alternatives,
       diagnosticNotes: diagnosticNotes,
+      unclassifiedLines: unclassified,
     );
   }
 
@@ -1117,12 +1707,44 @@ class FieldSemanticEvaluator {
   static FieldCandidate? _findBestCandidateInLines(
     List<String> lines, {
     required FieldCandidate Function(String line, int index) evaluator,
+    bool evaluateAdjacentPairs = false,
   }) {
     FieldCandidate? best;
     for (int i = 0; i < lines.length; i++) {
       final cand = evaluator(lines[i], i);
       if (best == null || cand.semanticConfidence > best.semanticConfidence) {
         best = cand;
+      }
+    }
+    if (evaluateAdjacentPairs && lines.length >= 2) {
+      for (int i = 0; i < lines.length - 1; i++) {
+        final line1 = lines[i].trim();
+        final line2 = lines[i + 1].trim();
+        if (_orgSuffixRegExp.hasMatch(line1)) continue;
+        if (isLocationOrAddressLine(line2)) continue;
+        if (_titleTokensRegExp.hasMatch(line1) || _titleTokensRegExp.hasMatch(line2)) continue;
+
+        final line1HasCat = _companyTypeTokensRegExp.hasMatch(line1);
+        final line2HasCat = _companyTypeTokensRegExp.hasMatch(line2) || _orgSuffixRegExp.hasMatch(line2);
+
+        final words1 = line1.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+        if (words1.length >= 2 && !_companyTypeTokensRegExp.hasMatch(line1)) {
+          continue;
+        }
+
+        final words2 = line2.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+        // If line 2 is already a complete multi-word company (e.g. "CHANDRU MEDICAL EQUIPMENTS" or "APEX MEDICAL SYSTEMS"),
+        // do not prepend a brand mark from line 1
+        if (words2.length >= 3 && line2HasCat) continue;
+
+        if (!line1HasCat && line2HasCat) {
+          final pairText = '$line1 $line2';
+          final pairCand = evaluator(pairText, i);
+          if (pairCand.semanticConfidence >= 0.35 &&
+              (best == null || pairCand.semanticConfidence > best.semanticConfidence)) {
+            best = pairCand;
+          }
+        }
       }
     }
     return best;
@@ -1140,6 +1762,7 @@ class FieldSemanticEvaluator {
       sourceEngine: sourceEngine,
       ocrConfidence: ocrConfidence,
       semanticConfidence: 0.0,
+      textQualityScore: computeTextQualityScore(value),
       rejectionReasons: rejectionReasons,
     );
   }
@@ -1170,15 +1793,121 @@ class FieldSemanticEvaluator {
     String? title,
   ) {
     final addr = <String>[];
-    for (final l in lines) {
-      final trimmed = l.trim();
+    final isExplicitAddrLine = <int, bool>{};
+
+    for (int i = 0; i < lines.length; i++) {
+      final trimmed = lines[i].trim();
       if (trimmed.isEmpty) continue;
-      if (name != null && trimmed.toLowerCase() == name.toLowerCase()) continue;
-      if (company != null && trimmed.toLowerCase() == company.toLowerCase()) continue;
-      if (title != null && trimmed.toLowerCase() == title.toLowerCase()) continue;
-      if (_emailRegExp.hasMatch(trimmed) || _phoneRegExp.hasMatch(trimmed)) continue;
+      if (name != null && name.trim().isNotEmpty) {
+        final lName = name.trim().toLowerCase();
+        final lTrimmed = trimmed.toLowerCase();
+        if (lTrimmed == lName || lTrimmed.contains(lName) || lName.contains(lTrimmed)) continue;
+      }
+      if (company != null && company.trim().isNotEmpty) {
+        final lComp = company.trim().toLowerCase();
+        final lTrimmed = trimmed.toLowerCase();
+        if (lTrimmed == lComp || lTrimmed.contains(lComp) || lComp.contains(lTrimmed)) continue;
+      }
+      if (title != null && title.trim().isNotEmpty) {
+        final lTitle = title.trim().toLowerCase();
+        final lTrimmed = trimmed.toLowerCase();
+        if (lTrimmed == lTitle || lTrimmed.contains(lTitle) || lTitle.contains(lTrimmed)) continue;
+      }
+      if (_emailRegExp.hasMatch(trimmed) || trimmed.contains('@')) continue;
+      if (_urlSchemeOrWwwRegExp.hasMatch(trimmed)) continue;
+
+      // Skip explicit phone labels
+      final isExplicitPhone = RegExp(
+        r'^(?:m|mob|mobile|p|ph|phone|tel|telephone|fax|whatsapp|cell)\s*[:\-\.]',
+        caseSensitive: false,
+      ).hasMatch(trimmed);
+      if (isExplicitPhone) continue;
+
+      // Skip pure phone numbers
+      if (RegExp(r'^(?:\+?\d{1,4}[-\s.]?)?\(?\d{2,5}\)?[-\s.]?\d{3,5}[-\s.]?\d{3,5}$').hasMatch(trimmed)) {
+        continue;
+      }
+
+      // Skip tax & statutory numbers
+      final upper = trimmed.toUpperCase();
+      if (upper.contains('GSTIN') || upper.contains('GST:') || upper.contains('CIN:') || upper.contains('INVOICE:') || upper.contains('PAN:') || upper.startsWith('ISO') || upper.startsWith('CE ')) {
+        continue;
+      }
+
+      final addrLabelMatch = RegExp(
+        r'^(?:address|addr|office address|office|headquarters|hq|location)\s*[:\-]\s*(.+)$',
+        caseSensitive: false,
+      ).firstMatch(trimmed);
+      if (addrLabelMatch != null) {
+        isExplicitAddrLine[i] = true;
+        continue;
+      }
 
       if (isLocationOrAddressLine(trimmed)) {
+        isExplicitAddrLine[i] = true;
+      }
+    }
+
+    // Preserve intermediate address lines within address clusters
+    for (int i = 0; i < lines.length; i++) {
+      final trimmed = lines[i].trim();
+      if (trimmed.isEmpty) continue;
+      if (name != null && name.trim().isNotEmpty) {
+        final lName = name.trim().toLowerCase();
+        final lTrimmed = trimmed.toLowerCase();
+        if (lTrimmed == lName || lTrimmed.contains(lName) || lName.contains(lTrimmed)) continue;
+      }
+      if (company != null && company.trim().isNotEmpty) {
+        final lComp = company.trim().toLowerCase();
+        final lTrimmed = trimmed.toLowerCase();
+        if (lTrimmed == lComp || lTrimmed.contains(lComp) || lComp.contains(lTrimmed)) continue;
+      }
+      if (title != null && title.trim().isNotEmpty) {
+        final lTitle = title.trim().toLowerCase();
+        final lTrimmed = trimmed.toLowerCase();
+        if (lTrimmed == lTitle || lTrimmed.contains(lTitle) || lTitle.contains(lTrimmed)) continue;
+      }
+      if (_emailRegExp.hasMatch(trimmed) || trimmed.contains('@')) continue;
+      if (_urlSchemeOrWwwRegExp.hasMatch(trimmed)) continue;
+      if (RegExp(r'^(?:m|mob|mobile|p|ph|phone|tel|telephone|fax|whatsapp|cell)\s*[:\-\.]', caseSensitive: false).hasMatch(trimmed)) continue;
+      if (RegExp(r'^(?:\+?\d{1,4}[-\s.]?)?\(?\d{2,5}\)?[-\s.]?\d{3,5}[-\s.]?\d{3,5}$').hasMatch(trimmed)) continue;
+      final upper = trimmed.toUpperCase();
+      if (upper.contains('GSTIN') || upper.contains('GST:') || upper.contains('CIN:') || upper.contains('INVOICE:') || upper.contains('PAN:') || upper.startsWith('ISO') || upper.startsWith('CE ')) continue;
+
+      final addrLabelMatch = RegExp(
+        r'^(?:address|addr|office address|office|headquarters|hq|location)\s*[:\-]\s*(.+)$',
+        caseSensitive: false,
+      ).firstMatch(trimmed);
+      if (addrLabelMatch != null) {
+        final val = addrLabelMatch.group(1)!.trim();
+        if (val.isNotEmpty) addr.add(val);
+        continue;
+      }
+
+      bool shouldAdd = isExplicitAddrLine[i] == true;
+
+      // Intermediate line preservation: line i is flanked by address lines within a window of 2
+      if (!shouldAdd) {
+        final bool isOtherEntity = _orgSuffixRegExp.hasMatch(trimmed) ||
+            _companyTypeTokensRegExp.hasMatch(trimmed) ||
+            _titleTokensRegExp.hasMatch(trimmed) ||
+            _honorificPrefixRegExp.hasMatch(trimmed) ||
+            _credentialTokenRegExp.hasMatch(trimmed) ||
+            isSlogan(trimmed) ||
+            evaluateNameCandidate(rawLine: trimmed, sourceEngine: 'AddressGuard').semanticConfidence >= 0.40;
+
+        if (!isOtherEntity) {
+          final bool precededByAddr = (i > 0 && isExplicitAddrLine[i - 1] == true) || (i > 1 && isExplicitAddrLine[i - 2] == true);
+          final bool followedByAddr = (i < lines.length - 1 && isExplicitAddrLine[i + 1] == true) || (i < lines.length - 2 && isExplicitAddrLine[i + 2] == true);
+          if (precededByAddr && followedByAddr) {
+            shouldAdd = true;
+          } else if (followedByAddr && (trimmed.endsWith(',') || RegExp(r'^\s*(?:#|no\.?|door|flat|plot|survey)?\s*\d+[/0-9a-zA-Z-]*\b', caseSensitive: false).hasMatch(trimmed))) {
+            shouldAdd = true;
+          }
+        }
+      }
+
+      if (shouldAdd) {
         addr.add(trimmed);
       }
     }
@@ -1193,7 +1922,269 @@ class FieldSemanticEvaluator {
         .replaceAll(RegExp(r'\/.*$'), '');
   }
 
-  static String _normalizeName(String s) {
-    return s.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '').trim();
+  static String _normalizeConfusionCharacters(String s) {
+    return s
+        .replaceAll('0', 'O')
+        .replaceAll('1', 'I')
+        .replaceAll('5', 'S')
+        .replaceAll('8', 'B')
+        .replaceAll('2', 'Z')
+        .replaceAll('6', 'G')
+        .replaceAll('7', 'T')
+        .replaceAll('l', 'I')
+        .replaceAll('L', 'I')
+        .replaceAll('|', 'I')
+        .replaceAll(RegExp(r'rn', caseSensitive: false), 'M')
+        .replaceAll(RegExp(r'vv', caseSensitive: false), 'W')
+        .toUpperCase()
+        .replaceAll(RegExp(r'[^A-Z]'), '');
+  }
+
+  static String _normalizeForComparison(String text) {
+    return text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '').trim();
+  }
+
+  static FieldCandidate? _arbitrateCandidateField({
+    required String fieldName,
+    required FieldCandidate? candP,
+    required FieldCandidate? candS,
+    required bool primaryIsPaddle,
+    required bool secondaryIsPaddle,
+    required List<String> agreedSignals,
+    required List<String> diagnosticNotes,
+    required Map<String, List<String>> alternatives,
+    double minAcceptableSemanticConfidence = 0.30,
+    double minAcceptableTextQuality = 0.40,
+    bool isNameField = false,
+  }) {
+    if (candP == null && candS == null) return null;
+    if (candP == null) {
+      final s = candS!;
+      if (s.semanticConfidence >= minAcceptableSemanticConfidence &&
+          s.textQualityScore >= minAcceptableTextQuality) {
+        return s;
+      }
+      return null;
+    }
+    if (candS == null) {
+      final p = candP;
+      if (p.semanticConfidence >= minAcceptableSemanticConfidence &&
+          p.textQualityScore >= minAcceptableTextQuality) {
+        return p;
+      }
+      return null;
+    }
+
+    final FieldCandidate p = candP;
+    final FieldCandidate s = candS;
+
+    // Both candidates exist. Check near-equivalence first.
+    final normP = _normalizeForComparison(p.value);
+    final normS = _normalizeForComparison(s.value);
+
+    final normConfP = _normalizeConfusionCharacters(p.value);
+    final normConfS = _normalizeConfusionCharacters(s.value);
+    final bool isConfusionEquivalent = normConfP.isNotEmpty &&
+        normConfS.isNotEmpty &&
+        normConfP.length >= 4 &&
+        normConfP == normConfS;
+
+    final bool isNearEquivalent = isConfusionEquivalent ||
+        (normP.isNotEmpty &&
+            normS.isNotEmpty &&
+            (normP == normS ||
+                (normP.length >= 4 &&
+                    normS.length >= 4 &&
+                    (normP.contains(normS) || normS.contains(normP)) &&
+                    (normP.length - normS.length).abs() <= 2)));
+
+    if (isNearEquivalent) {
+      final baseSemantic = max(p.semanticConfidence, s.semanticConfidence);
+      if (baseSemantic < minAcceptableSemanticConfidence) {
+        diagnosticNotes.add(
+          'Discarded near-equivalent $fieldName "${p.value}" because base semantic confidence (${baseSemantic.toStringAsFixed(2)}) < $minAcceptableSemanticConfidence',
+        );
+        return null;
+      }
+
+      if (!agreedSignals.contains(fieldName)) agreedSignals.add(fieldName);
+      if (fieldName == 'fullName' && !agreedSignals.contains('name')) {
+        agreedSignals.add('name');
+      }
+
+      // Compare formatting quality (prefer clean spaces, Title Case over fused camel/lowercasing)
+      final fmtP = scoreFormattingQuality(p.value);
+      final fmtS = scoreFormattingQuality(s.value);
+
+      final pWordDigits = p.value.replaceAll(RegExp(r'[^0-9]'), '').length;
+      final sWordDigits = s.value.replaceAll(RegExp(r'[^0-9]'), '').length;
+
+      final FieldCandidate winner;
+      final FieldCandidate loser;
+      if (pWordDigits != sWordDigits) {
+        winner = pWordDigits < sWordDigits ? p : s;
+        loser = pWordDigits < sWordDigits ? s : p;
+      } else if ((fmtP - fmtS).abs() > 0.05) {
+        winner = fmtP >= fmtS ? p : s;
+        loser = fmtP >= fmtS ? s : p;
+      } else if (p.ocrConfidence != s.ocrConfidence) {
+        winner = p.ocrConfidence >= s.ocrConfidence ? p : s;
+        loser = p.ocrConfidence >= s.ocrConfidence ? s : p;
+      } else {
+        winner = p.textQualityScore >= s.textQualityScore ? p : s;
+        loser = p.textQualityScore >= s.textQualityScore ? s : p;
+      }
+
+      final boostedSemantic =
+          min(1.0, max(p.semanticConfidence, s.semanticConfidence) + 0.15);
+      final mergedCandidate = FieldCandidate(
+        field: fieldName,
+        value: winner.value,
+        sourceEngine: 'Agreed (${p.sourceEngine} & ${s.sourceEngine})',
+        ocrConfidence: max(p.ocrConfidence, s.ocrConfidence),
+        semanticConfidence: boostedSemantic,
+        textQualityScore: max(p.textQualityScore, s.textQualityScore),
+        positiveEvidence: [
+          ...winner.positiveEvidence,
+          'Cross-engine consensus with clean formatting preferred over ${loser.value}',
+        ],
+        spatialEvidence: winner.spatialEvidence,
+      );
+
+      if (loser.value.isNotEmpty && loser.value != winner.value) {
+        alternatives[fieldName] = [loser.value];
+      }
+      diagnosticNotes.add(
+        'Reconciled duplicate/near-equivalent $fieldName: "${winner.value}" (fmt: ${fmtP.toStringAsFixed(2)}) preferred over "${loser.value}" (fmt: ${fmtS.toStringAsFixed(2)})',
+      );
+
+      if (mergedCandidate.textQualityScore < minAcceptableTextQuality) {
+        return null;
+      }
+
+      return mergedCandidate;
+    }
+
+    // Disagreement between different candidate strings
+    // Compute composite quality-weighted score: 65% semantic, 35% text quality
+    final compositeP =
+        (p.semanticConfidence * 0.65) + (p.textQualityScore * 0.35);
+    final compositeS =
+        (s.semanticConfidence * 0.65) + (s.textQualityScore * 0.35);
+
+    // Severe garbled-text check: if one candidate is garbled, clean candidate wins immediately!
+    final bool pIsGarbled = p.textQualityScore < 0.55 ||
+        p.rejectionReasons.any((r) =>
+            r.contains('mixed digits') ||
+            r.contains('Low text quality') ||
+            r.contains('corrupt'));
+    final bool sIsGarbled = s.textQualityScore < 0.55 ||
+        s.rejectionReasons.any((r) =>
+            r.contains('mixed digits') ||
+            r.contains('Low text quality') ||
+            r.contains('corrupt'));
+
+    FieldCandidate? selected;
+    FieldCandidate? alternate;
+
+    if (pIsGarbled && !sIsGarbled && s.semanticConfidence >= minAcceptableSemanticConfidence) {
+      selected = s;
+      alternate = p;
+      diagnosticNotes.add(
+          'Selected clean $fieldName "${s.value}" over garbled candidate "${p.value}"');
+    } else if (sIsGarbled && !pIsGarbled && p.semanticConfidence >= minAcceptableSemanticConfidence) {
+      selected = p;
+      alternate = s;
+      diagnosticNotes.add(
+          'Selected clean $fieldName "${p.value}" over garbled candidate "${s.value}"');
+    } else if (isNameField) {
+      // Special rule for name field: full name vs initials
+      final pHasInitials = p.value
+          .split(RegExp(r'\s+'))
+          .any((w) => RegExp(r'^[A-Z]\.?$').hasMatch(w));
+      final sHasInitials = s.value
+          .split(RegExp(r'\s+'))
+          .any((w) => RegExp(r'^[A-Z]\.?$').hasMatch(w));
+      if (!pHasInitials && sHasInitials && p.isTrustworthy && (compositeP - compositeS).abs() < 0.20) {
+        selected = p;
+        alternate = s;
+      } else if (pHasInitials && !sHasInitials && s.isTrustworthy && (compositeS - compositeP).abs() < 0.20) {
+        selected = s;
+        alternate = p;
+      }
+    } else if (fieldName == 'jobTitle') {
+      final pHasOccupational = _titleTokensRegExp.hasMatch(p.value);
+      final sHasOccupational = _titleTokensRegExp.hasMatch(s.value);
+      if (pHasOccupational && !sHasOccupational && p.isTrustworthy) {
+        selected = p;
+        alternate = s;
+        diagnosticNotes.add(
+            'Selected job title "${p.value}" with occupational evidence over non-occupational "${s.value}"');
+      } else if (sHasOccupational && !pHasOccupational && s.isTrustworthy) {
+        selected = s;
+        alternate = p;
+        diagnosticNotes.add(
+            'Selected job title "${s.value}" with occupational evidence over non-occupational "${p.value}"');
+      }
+    } else if (fieldName == 'company') {
+      final pHasOrg = _companyTypeTokensRegExp.hasMatch(p.value);
+      final sHasOrg = _companyTypeTokensRegExp.hasMatch(s.value);
+      if (pHasOrg && !sHasOrg && p.isTrustworthy) {
+        selected = p;
+        alternate = s;
+        diagnosticNotes.add(
+            'Selected company "${p.value}" with organization indicator over non-organization "${s.value}"');
+      } else if (sHasOrg && !pHasOrg && s.isTrustworthy) {
+        selected = s;
+        alternate = p;
+        diagnosticNotes.add(
+            'Selected company "${s.value}" with organization indicator over non-organization "${p.value}"');
+      }
+    }
+
+    if (selected == null) {
+      final scoreDelta = compositeP - compositeS;
+      if (scoreDelta.abs() >= 0.05) {
+        // Clear winner by score
+        if (scoreDelta > 0) {
+          selected = p;
+          alternate = s;
+        } else {
+          selected = s;
+          alternate = p;
+        }
+        diagnosticNotes.add(
+          'Selected $fieldName "${selected.value}" (comp: ${max(compositeP, compositeS).toStringAsFixed(2)}) '
+          'decisively over "${alternate.value}" (comp: ${min(compositeP, compositeS).toStringAsFixed(2)})',
+        );
+      } else {
+        // Score is very close (< 0.05 difference, effectively a tie).
+        // If primary engine candidate is solid (good quality & confidence), prefer primary as tie-breaker
+        if ((p.textQualityScore - s.textQualityScore).abs() >= 0.05) {
+          selected = p.textQualityScore > s.textQualityScore ? p : s;
+          alternate = p.textQualityScore > s.textQualityScore ? s : p;
+          diagnosticNotes.add('Text quality tie-break selected $fieldName: "${selected.value}"');
+        } else {
+          selected = compositeP >= compositeS ? p : s;
+          alternate = compositeP >= compositeS ? s : p;
+        }
+      }
+    }
+
+    final winningCandidate = selected;
+
+    if (alternate != null && alternate.value.isNotEmpty && alternate.value != winningCandidate.value) {
+      alternatives[fieldName] = [alternate.value];
+    }
+
+    // Minimum acceptance filter
+    if (winningCandidate.semanticConfidence < minAcceptableSemanticConfidence ||
+        winningCandidate.textQualityScore < minAcceptableTextQuality) {
+      diagnosticNotes.add(
+          'Discarded winning $fieldName "${winningCandidate.value}" because confidence or text quality failed minimum threshold');
+      return null;
+    }
+
+    return winningCandidate;
   }
 }

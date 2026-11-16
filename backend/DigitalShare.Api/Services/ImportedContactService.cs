@@ -1,5 +1,6 @@
 using DigitalShare.Api.Data;
 using DigitalShare.Api.DTOs.ImportedContacts;
+using DigitalShare.Api.Exceptions;
 using DigitalShare.Api.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -90,18 +91,57 @@ public class ImportedContactService : IImportedContactService
         return new CheckDuplicateResponse { IsDuplicate = false };
     }
 
+    public Task<ImportedContactResponse> SaveContactAsync(
+        string ownerUserId,
+        SaveImportedContactRequest request) => SaveContactAsync(ownerUserId, request, null);
+
     public async Task<ImportedContactResponse> SaveContactAsync(
         string ownerUserId,
-        SaveImportedContactRequest request)
+        SaveImportedContactRequest request,
+        string? clientRequestId)
     {
+        var normalizedClientRequestId = string.IsNullOrWhiteSpace(clientRequestId)
+            ? null
+            : clientRequestId.Trim();
+
+        string? payloadHash = null;
+        if (normalizedClientRequestId != null)
+        {
+            payloadHash = ContactNormalizationHelper.ComputePayloadHash(request);
+
+            var existingCard = await _dbContext.ImportedBusinessCards
+                .Include(c => c.PhoneNumbers)
+                .Include(c => c.EmailAddresses)
+                .FirstOrDefaultAsync(c => c.OwnerUserId == ownerUserId && c.ClientRequestId == normalizedClientRequestId);
+
+            if (existingCard != null)
+            {
+                if (existingCard.RequestPayloadHash != payloadHash)
+                {
+                    _logger.LogWarning(
+                        "Idempotency conflict for user {UserId} with clientRequestId {ClientRequestId}",
+                        ownerUserId, normalizedClientRequestId);
+                    throw new IdempotencyConflictException("Idempotency key has already been used with a different request payload.");
+                }
+
+                _logger.LogInformation(
+                    "Idempotent hit for user {UserId} with clientRequestId {ClientRequestId}, returning card {CardId}",
+                    ownerUserId, normalizedClientRequestId, existingCard.Id);
+                return MapToResponse(existingCard);
+            }
+        }
+
         var card = new ImportedBusinessCard
         {
             OwnerUserId = ownerUserId,
+            ClientRequestId = normalizedClientRequestId,
+            RequestPayloadHash = payloadHash,
             FullName = request.FullName?.Trim(),
             Company = request.Company?.Trim(),
             JobTitle = request.JobTitle?.Trim(),
             Website = request.Website?.Trim(),
             Address = request.Address?.Trim(),
+            PersonalRemark = string.IsNullOrWhiteSpace(request.PersonalRemark) ? null : request.PersonalRemark.Trim(),
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow,
         };
@@ -129,7 +169,42 @@ public class ImportedContactService : IImportedContactService
         }
 
         _dbContext.ImportedBusinessCards.Add(card);
-        await _dbContext.SaveChangesAsync();
+
+        try
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex)
+        {
+            if (normalizedClientRequestId != null)
+            {
+                // In case of a race condition between two concurrent requests with the same clientRequestId
+                var concurrentWinner = await _dbContext.ImportedBusinessCards
+                    .AsNoTracking()
+                    .Include(c => c.PhoneNumbers)
+                    .Include(c => c.EmailAddresses)
+                    .FirstOrDefaultAsync(c => c.OwnerUserId == ownerUserId && c.ClientRequestId == normalizedClientRequestId);
+
+                if (concurrentWinner != null)
+                {
+                    if (concurrentWinner.RequestPayloadHash != payloadHash)
+                    {
+                        _logger.LogWarning(
+                            "Concurrent race idempotency conflict for user {UserId} with clientRequestId {ClientRequestId}",
+                            ownerUserId, normalizedClientRequestId);
+                        throw new IdempotencyConflictException("Idempotency key has already been used with a different request payload.");
+                    }
+
+                    _logger.LogInformation(
+                        "Concurrent race resolved: user {UserId} with clientRequestId {ClientRequestId} returning card {CardId}",
+                        ownerUserId, normalizedClientRequestId, concurrentWinner.Id);
+                    return MapToResponse(concurrentWinner);
+                }
+            }
+
+            _logger.LogError(ex, "Error occurred while saving imported contact for user {UserId}", ownerUserId);
+            throw;
+        }
 
         _logger.LogInformation(
             "User {UserId} saved imported business card {CardId}",
@@ -181,6 +256,10 @@ public class ImportedContactService : IImportedContactService
         card.JobTitle = request.JobTitle?.Trim();
         card.Website = request.Website?.Trim();
         card.Address = request.Address?.Trim();
+        if (request.PersonalRemark != null)
+        {
+            card.PersonalRemark = string.IsNullOrWhiteSpace(request.PersonalRemark) ? null : request.PersonalRemark.Trim();
+        }
         card.UpdatedAtUtc = DateTime.UtcNow;
 
         // Remove existing phone and email children
@@ -246,16 +325,43 @@ public class ImportedContactService : IImportedContactService
         return true;
     }
 
+    public async Task<ImportedContactResponse?> UpdateRemarkAsync(string ownerUserId, Guid id, string? remark)
+    {
+        var card = await _dbContext.ImportedBusinessCards
+            .Where(c => c.Id == id && c.OwnerUserId == ownerUserId)
+            .Include(c => c.PhoneNumbers)
+            .Include(c => c.EmailAddresses)
+            .FirstOrDefaultAsync();
+
+        if (card == null) return null;
+
+        card.PersonalRemark = string.IsNullOrWhiteSpace(remark) ? null : remark.Trim();
+        card.UpdatedAtUtc = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("User {UserId} updated remark on business card {CardId}", ownerUserId, id);
+
+        return MapToResponse(card);
+    }
+
+    public async Task<ImportedContactResponse?> ClearRemarkAsync(string ownerUserId, Guid id)
+    {
+        return await UpdateRemarkAsync(ownerUserId, id, null);
+    }
+
     private static ImportedContactResponse MapToResponse(ImportedBusinessCard card)
     {
         return new ImportedContactResponse
         {
             Id = card.Id,
+            ClientRequestId = card.ClientRequestId,
             FullName = card.FullName,
             Company = card.Company,
             JobTitle = card.JobTitle,
             Website = card.Website,
             Address = card.Address,
+            PersonalRemark = card.PersonalRemark,
             CreatedAtUtc = card.CreatedAtUtc,
             UpdatedAtUtc = card.UpdatedAtUtc,
             PhoneNumbers = card.PhoneNumbers.Select(p => new ImportedContactPhoneResponse

@@ -823,7 +823,7 @@ void main() {
 
       final apiClient = ApiClient(httpClient: fakeClient, storageService: secureStorage);
       final authService = AuthService(apiClient: apiClient, storageService: secureStorage);
-      final profileService = ProfileService(apiClient: apiClient);
+      final profileService = ProfileService(apiClient: apiClient, storageService: secureStorage);
 
       await tester.pumpWidget(
         MaterialApp(
@@ -835,7 +835,9 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(refreshCalls, equals(1));
       expect(find.byType(HomeScreen), findsOneWidget);
@@ -861,7 +863,7 @@ void main() {
 
       final apiClient = ApiClient(httpClient: fakeClient, storageService: secureStorage);
       final authService = AuthService(apiClient: apiClient, storageService: secureStorage);
-      final profileService = ProfileService(apiClient: apiClient);
+      final profileService = ProfileService(apiClient: apiClient, storageService: secureStorage);
 
       await tester.pumpWidget(
         MaterialApp(
@@ -873,7 +875,9 @@ void main() {
         ),
       );
 
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 300));
 
       expect(find.byType(LoginScreen), findsOneWidget);
       expect(find.byType(HomeScreen), findsNothing);

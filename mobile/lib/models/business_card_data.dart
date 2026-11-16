@@ -1,5 +1,7 @@
 import 'business_card_email.dart';
 import 'business_card_phone.dart';
+import 'field_evidence.dart';
+import 'recovered_ocr_observation.dart';
 
 class BusinessCardData {
   final String? fullName;
@@ -27,6 +29,18 @@ class BusinessCardData {
   /// Isolated raw text from back side.
   final String? backRawText;
 
+  /// Conceptual confidence states for each field ('highConfidence', 'uncertain', 'notDetected').
+  final Map<String, String> fieldConfidenceStates;
+
+  /// Valid recognized text lines that the parser did not classify into a known field (Part 15).
+  final List<String> unclassifiedLines;
+
+  /// Granular field-level OCR evidence supporting each extracted field.
+  final Map<String, FieldEvidence> fieldEvidence;
+
+  /// Structured OCR observations recovered through targeted high-resolution re-OCR.
+  final List<RecoveredOcrObservation> recoveredObservations;
+
   const BusinessCardData({
     this.fullName,
     this.company,
@@ -41,6 +55,10 @@ class BusinessCardData {
     this.isDualSided = false,
     this.frontRawText,
     this.backRawText,
+    this.fieldConfidenceStates = const {},
+    this.unclassifiedLines = const [],
+    this.fieldEvidence = const {},
+    this.recoveredObservations = const [],
   });
 
   bool get isEmpty =>
@@ -68,6 +86,10 @@ class BusinessCardData {
     bool? isDualSided,
     String? frontRawText,
     String? backRawText,
+    Map<String, String>? fieldConfidenceStates,
+    List<String>? unclassifiedLines,
+    Map<String, FieldEvidence>? fieldEvidence,
+    List<RecoveredOcrObservation>? recoveredObservations,
   }) {
     return BusinessCardData(
       fullName: fullName ?? this.fullName,
@@ -84,6 +106,12 @@ class BusinessCardData {
       isDualSided: isDualSided ?? this.isDualSided,
       frontRawText: frontRawText ?? this.frontRawText,
       backRawText: backRawText ?? this.backRawText,
+      fieldConfidenceStates:
+          fieldConfidenceStates ?? this.fieldConfidenceStates,
+      unclassifiedLines: unclassifiedLines ?? this.unclassifiedLines,
+      fieldEvidence: fieldEvidence ?? this.fieldEvidence,
+      recoveredObservations:
+          recoveredObservations ?? this.recoveredObservations,
     );
   }
 
@@ -103,6 +131,14 @@ class BusinessCardData {
       'isDualSided': isDualSided,
       if (frontRawText != null) 'frontRawText': frontRawText,
       if (backRawText != null) 'backRawText': backRawText,
+      if (fieldConfidenceStates.isNotEmpty)
+        'fieldConfidenceStates': fieldConfidenceStates,
+      if (unclassifiedLines.isNotEmpty) 'unclassifiedLines': unclassifiedLines,
+      if (fieldEvidence.isNotEmpty)
+        'fieldEvidence': fieldEvidence.map((k, v) => MapEntry(k, v.toJson())),
+      if (recoveredObservations.isNotEmpty)
+        'recoveredObservations':
+            recoveredObservations.map((r) => r.toJson()).toList(),
     };
   }
 
@@ -136,6 +172,23 @@ class BusinessCardData {
       isDualSided: json['isDualSided'] as bool? ?? false,
       frontRawText: json['frontRawText'] as String?,
       backRawText: json['backRawText'] as String?,
+      fieldConfidenceStates: (json['fieldConfidenceStates']
+                  as Map<String, dynamic>?)
+              ?.map((k, v) => MapEntry(k, v.toString())) ??
+          const {},
+      unclassifiedLines: (json['unclassifiedLines'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
+      fieldEvidence: (json['fieldEvidence'] as Map<String, dynamic>?)?.map(
+            (k, v) => MapEntry(k, FieldEvidence.fromJson(v as Map<String, dynamic>)),
+          ) ??
+          const {},
+      recoveredObservations: (json['recoveredObservations'] as List<dynamic>?)
+              ?.map((e) =>
+                  RecoveredOcrObservation.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
     );
   }
 

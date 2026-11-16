@@ -1,10 +1,49 @@
+using System.Security.Cryptography;
+using System.Text;
+using DigitalShare.Api.DTOs.ImportedContacts;
+
 namespace DigitalShare.Api.Services;
 
 /// <summary>
-/// Helper providing phone and email normalization and conservative matching algorithms.
+/// Helper providing phone and email normalization, payload hashing, and conservative matching algorithms.
 /// </summary>
 public static class ContactNormalizationHelper
 {
+    public static string ComputePayloadHash(SaveImportedContactRequest request)
+    {
+        var normalizedFullName = request.FullName?.Trim() ?? string.Empty;
+        var normalizedCompany = request.Company?.Trim() ?? string.Empty;
+        var normalizedJobTitle = request.JobTitle?.Trim() ?? string.Empty;
+        var normalizedWebsite = request.Website?.Trim() ?? string.Empty;
+        var normalizedAddress = request.Address?.Trim() ?? string.Empty;
+
+        var sortedPhones = (request.PhoneNumbers ?? Enumerable.Empty<ImportedContactPhoneDto>())
+            .Where(p => !string.IsNullOrWhiteSpace(p.Number))
+            .Select(p => $"{NormalizePhone(p.Number)}|{p.Label?.Trim().ToLowerInvariant()}")
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+
+        var sortedEmails = (request.EmailAddresses ?? Enumerable.Empty<ImportedContactEmailDto>())
+            .Where(e => !string.IsNullOrWhiteSpace(e.Email))
+            .Select(e => $"{NormalizeEmail(e.Email)}|{e.Label?.Trim().ToLowerInvariant()}")
+            .OrderBy(e => e, StringComparer.Ordinal)
+            .ToList();
+
+        var canonical = string.Join(";",
+            $"fn:{normalizedFullName}",
+            $"cp:{normalizedCompany}",
+            $"jt:{normalizedJobTitle}",
+            $"ws:{normalizedWebsite}",
+            $"ad:{normalizedAddress}",
+            $"ph:{string.Join(",", sortedPhones)}",
+            $"em:{string.Join(",", sortedEmails)}"
+        );
+
+        var bytes = Encoding.UTF8.GetBytes(canonical);
+        var hashBytes = SHA256.HashData(bytes);
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
     public static string NormalizeEmail(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return string.Empty;

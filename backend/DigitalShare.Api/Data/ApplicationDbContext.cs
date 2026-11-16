@@ -20,6 +20,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<AvailabilitySlot> AvailabilitySlots => Set<AvailabilitySlot>();
     public DbSet<MeetingRequest> MeetingRequests => Set<MeetingRequest>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<ScanJob> ScanJobs => Set<ScanJob>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -48,6 +49,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(p => p.Address).HasMaxLength(256);
             entity.Property(p => p.Bio).HasMaxLength(1000);
             entity.Property(p => p.ProfilePhotoUrl).HasMaxLength(500);
+            entity.Property(p => p.IsPublic).HasDefaultValue(false);
             entity.Property(p => p.CreatedAtUtc).IsRequired();
             entity.Property(p => p.UpdatedAtUtc).IsRequired();
         });
@@ -81,13 +83,19 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         {
             entity.HasKey(c => c.Id);
             entity.HasIndex(c => c.OwnerUserId);
+            entity.HasIndex(c => new { c.OwnerUserId, c.ClientRequestId })
+                .IsUnique()
+                .HasFilter("\"ClientRequestId\" IS NOT NULL");
 
             entity.Property(c => c.OwnerUserId).IsRequired();
+            entity.Property(c => c.ClientRequestId).HasMaxLength(64);
+            entity.Property(c => c.RequestPayloadHash).HasMaxLength(64);
             entity.Property(c => c.FullName).HasMaxLength(100);
             entity.Property(c => c.Company).HasMaxLength(100);
             entity.Property(c => c.JobTitle).HasMaxLength(100);
             entity.Property(c => c.Website).HasMaxLength(256);
             entity.Property(c => c.Address).HasMaxLength(500);
+            entity.Property(c => c.PersonalRemark).HasMaxLength(2000);
             entity.Property(c => c.CreatedAtUtc).IsRequired();
             entity.Property(c => c.UpdatedAtUtc).IsRequired();
 
@@ -210,6 +218,37 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(r => r.User)
                 .WithMany()
                 .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ScanJob>(entity =>
+        {
+            entity.ToTable("ScanJobs");
+            entity.HasKey(j => j.Id);
+
+            entity.Property(j => j.UserId).IsRequired();
+            entity.Property(j => j.ClientJobId).IsRequired().HasMaxLength(64);
+            entity.Property(j => j.Status)
+                .IsRequired()
+                .HasConversion<string>()
+                .HasMaxLength(20);
+            entity.Property(j => j.FrontImageStorageKey).IsRequired().HasMaxLength(500);
+            entity.Property(j => j.BackImageStorageKey).HasMaxLength(500);
+            entity.Property(j => j.ImageSha256Checksum).HasMaxLength(64);
+            entity.Property(j => j.ErrorMessage).HasMaxLength(500);
+            entity.Property(j => j.WorkerInstanceId).HasMaxLength(100);
+            entity.Property(j => j.CreatedAtUtc).IsRequired();
+            entity.Property(j => j.UpdatedAtUtc).IsRequired();
+            entity.Property(j => j.ExpiresAtUtc).IsRequired();
+
+            entity.HasIndex(j => new { j.UserId, j.ClientJobId }).IsUnique();
+            entity.HasIndex(j => new { j.UserId, j.Status });
+            entity.HasIndex(j => j.ExpiresAtUtc);
+            entity.HasIndex(j => new { j.Status, j.LockedUntilUtc });
+
+            entity.HasOne(j => j.User)
+                .WithMany()
+                .HasForeignKey(j => j.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

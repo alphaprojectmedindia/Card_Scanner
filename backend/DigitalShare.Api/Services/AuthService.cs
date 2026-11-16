@@ -4,6 +4,7 @@ using DigitalShare.Api.Configuration;
 using DigitalShare.Api.Data;
 using DigitalShare.Api.DTOs.Auth;
 using DigitalShare.Api.Models;
+using DigitalShare.Api.Services.Storage;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -18,6 +19,8 @@ public class AuthService : IAuthService
     private readonly IShareIdGenerator _shareIdGenerator;
     private readonly ILogger<AuthService> _logger;
     private readonly JwtOptions _jwtOptions;
+    private readonly IScanImageStorageService? _scanStorageService;
+    private readonly IFileStorageService? _fileStorageService;
 
     public AuthService(
         UserManager<ApplicationUser> userManager,
@@ -25,7 +28,9 @@ public class AuthService : IAuthService
         IJwtTokenGenerator jwtTokenGenerator,
         IShareIdGenerator shareIdGenerator,
         ILogger<AuthService> logger,
-        IOptions<JwtOptions>? jwtOptions = null)
+        IOptions<JwtOptions>? jwtOptions = null,
+        IScanImageStorageService? scanStorageService = null,
+        IFileStorageService? fileStorageService = null)
     {
         _userManager = userManager;
         _dbContext = dbContext;
@@ -33,6 +38,8 @@ public class AuthService : IAuthService
         _shareIdGenerator = shareIdGenerator;
         _logger = logger;
         _jwtOptions = jwtOptions?.Value ?? new JwtOptions();
+        _scanStorageService = scanStorageService;
+        _fileStorageService = fileStorageService;
     }
 
     /// <summary>
@@ -292,5 +299,178 @@ public class AuthService : IAuthService
         }
 
         return true;
+    }
+
+    public async Task<(bool Success, string? Error)> DeleteAccountAsync(string userId, string password)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return (false, "User context is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            return (false, "Password is required for reauthentication.");
+        }
+
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null)
+        {
+            return (false, "User account not found.");
+        }
+
+        var passwordValid = await _userManager.CheckPasswordAsync(user, password);
+        if (!passwordValid)
+        {
+            _logger.LogWarning("Account deletion reauthentication failed for user {UserId}", userId);
+            return (false, "Invalid password. Reauthentication failed.");
+        }
+
+        // Collect storage files before DB records are deleted
+        var profile = await _dbContext.UserProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
+        var profilePhotoUrl = profile?.ProfilePhotoUrl;
+        var profileId = profile?.Id;
+
+        var scanJobs = await _dbContext.ScanJobs
+            .Where(j => j.UserId == userId)
+            .ToListAsync();
+
+        var storageKeys = scanJobs
+            .SelectMany(j => new[] { j.FrontImageStorageKey, j.BackImageStorageKey })
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Distinct()
+            .ToList();
+
+        // Entity cascade logic
+        async Task ExecuteCascadeAsync()
+        {
+            // 1. Meeting requests where user is requester or recipient (restrict constraint)
+            var meetings = await _dbContext.MeetingRequests
+                .Where(m => m.RequesterUserId == userId || m.RecipientUserId == userId)
+                .ToListAsync();
+            if (meetings.Count != 0)
+            {
+                _dbContext.MeetingRequests.RemoveRange(meetings);
+            }
+
+            // 2. Availability slots & settings
+            var slots = await _dbContext.AvailabilitySlots
+                .Where(s => s.UserId == userId)
+                .ToListAsync();
+            if (slots.Count != 0)
+            {
+                _dbContext.AvailabilitySlots.RemoveRange(slots);
+            }
+
+            var availability = await _dbContext.AvailabilitySettings
+                .Where(s => s.UserId == userId)
+                .ToListAsync();
+            if (availability.Count != 0)
+            {
+                _dbContext.AvailabilitySettings.RemoveRange(availability);
+            }
+
+            // 3. In-app connections owned by user or pointing to user's profile
+            var connections = await _dbContext.Connections
+                .Where(c => c.OwnerUserId == userId || (profileId != null && c.SavedProfileId == profileId.Value))
+                .ToListAsync();
+            if (connections.Count != 0)
+            {
+                _dbContext.Connections.RemoveRange(connections);
+            }
+
+            // 4. User-owned imported business cards
+            var cards = await _dbContext.ImportedBusinessCards
+                .Include(c => c.PhoneNumbers)
+                .Include(c => c.EmailAddresses)
+                .Where(c => c.OwnerUserId == userId)
+                .ToListAsync();
+            if (cards.Count != 0)
+            {
+                _dbContext.ImportedBusinessCards.RemoveRange(cards);
+            }
+
+            // 5. Scan jobs
+            if (scanJobs.Count != 0)
+            {
+                _dbContext.ScanJobs.RemoveRange(scanJobs);
+            }
+
+            // 6. Refresh tokens
+            var tokens = await _dbContext.RefreshTokens
+                .Where(r => r.UserId == userId)
+                .ToListAsync();
+            if (tokens.Count != 0)
+            {
+                _dbContext.RefreshTokens.RemoveRange(tokens);
+            }
+
+            // 7. User profile
+            if (profile != null)
+            {
+                _dbContext.UserProfiles.Remove(profile);
+            }
+
+            // 8. Identity user
+            _dbContext.Users.Remove(user);
+
+            await _dbContext.SaveChangesAsync();
+            _logger.LogInformation("Database records permanently deleted for user {UserId}", userId);
+        }
+
+        if (_dbContext.Database.IsRelational())
+        {
+            var strategy = _dbContext.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                using var transaction = await _dbContext.Database.BeginTransactionAsync();
+                try
+                {
+                    await ExecuteCascadeAsync();
+                    await transaction.CommitAsync();
+                }
+                catch (Exception ex)
+                {
+                    await transaction.RollbackAsync();
+                    _logger.LogError(ex, "Transaction rolled back during account deletion for user {UserId}", userId);
+                    throw;
+                }
+            });
+        }
+        else
+        {
+            await ExecuteCascadeAsync();
+        }
+
+        // 9. Post-transaction file storage cleanup (fail-soft outside DB transaction)
+        if (_scanStorageService != null && storageKeys.Count != 0)
+        {
+            foreach (var key in storageKeys)
+            {
+                try
+                {
+                    await _scanStorageService.DeleteScanImageAsync(key!);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to clean up scan image file {Key} for deleted user {UserId}", key, userId);
+                }
+            }
+        }
+
+        if (_fileStorageService != null && !string.IsNullOrWhiteSpace(profilePhotoUrl))
+        {
+            try
+            {
+                await _fileStorageService.DeleteProfilePhotoAsync(profilePhotoUrl);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to clean up profile photo {Url} for deleted user {UserId}", profilePhotoUrl, userId);
+            }
+        }
+
+        _logger.LogInformation("Account and associated data completely and permanently deleted for user {UserId}", userId);
+        return (true, null);
     }
 }

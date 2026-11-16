@@ -52,6 +52,7 @@ class MockOcrService implements IBusinessCardOcrService {
     required String imagePath,
     required CardSide side,
     String? source,
+    ViewfinderNormalizedRect? viewfinderRoi,
   }) async {
     wasCalled = true;
     return OcrSideResult.fromText(

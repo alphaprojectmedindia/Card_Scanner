@@ -1,11 +1,24 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:image/image.dart' as img;
 import 'ocr_engine.dart';
+import 'ocr_observation.dart';
+
+/// Decoded CTC recognition text and average character confidence score.
+class DecodedCtcResult {
+  final String text;
+  final double confidence;
+
+  const DecodedCtcResult({
+    required this.text,
+    required this.confidence,
+  });
+}
 
 /// Representation of a detected text line bounding box in pixel coordinates.
 class PaddleTextBox {
@@ -39,8 +52,8 @@ class PaddleTextBox {
 /// - Pure on-device processing via ONNX Runtime native mobile libraries.
 /// - Memory-safe execution:
 ///   * Sequential pipeline with aggressive native tensor disposal.
-///   * Controlled resolution downscaling (caps large camera images to max 960px).
-///   * Aspect-ratio preserving width scaling for text line crops.
+///   * High-resolution crop preservation (crops from original up to 2160px; detection input at 960px).
+///   * Aspect-ratio preserving width scaling up to 1600px for text line crops (prevents long email truncation).
 ///   * Native thread pooling (intraOpNumThreads = 2) for smooth UI.
 ///   * Bounded execution with a 25-second safety timeout.
 ///   * Fail-soft exception handling returning [OcrEngineResult.failure] without crashing.
@@ -54,10 +67,11 @@ class PaddleOcrEngine implements OcrEngine {
 
   static const int _vocabularySize = 18385;
   static const int _spaceTokenIndex = 18384;
-  static const int _maxImageDimension = 960;
+  static const int _maxImageDimension = 2160;
+  static const int _maxDetDimension = 960;
   static const int _recFixedCropHeight = 48;
-  static const double _dbNetThreshold = 0.30;
-  static const double _dbNetMinBoxScore = 0.50;
+  static const double _dbNetThreshold = 0.25;
+  static const double _dbNetMinBoxScore = 0.40;
 
   final OnnxRuntime _onnxRuntime;
   OrtSession? _detSession;
@@ -71,6 +85,18 @@ class PaddleOcrEngine implements OcrEngine {
 
   @override
   String get name => 'PaddleOCR (PP-OCRv5 Mobile)';
+
+  /// Asynchronously pre-warms the detection and recognition ONNX sessions
+  /// and dictionary ahead of time to eliminate cold-start latency on first scan.
+  Future<void> prewarm() async {
+    try {
+      await initialize();
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[PaddleOCR] Pre-warming non-fatal notice: ');
+      }
+    }
+  }
 
   /// Pre-loads models and dictionary into memory.
   /// Safe to call ahead of time or lazily on first recognition.
@@ -194,20 +220,20 @@ class PaddleOcrEngine implements OcrEngine {
     // Ensure pixels are physically upright according to EXIF metadata
     final uprightImage = img.bakeOrientation(decodedImage);
 
-    // 4. Downscale image if larger than max dimension to prevent OOM
-    final downscaledImage = _normalizeAndDownscale(uprightImage);
-    final originalImage = _enhanceContrastIfLow(downscaledImage);
+    // 4. Downscale image if larger than max dimension (2160px) to prevent OOM
+    final originalImage = _normalizeAndDownscale(uprightImage);
+    final enhancedImage = _enhanceContrastIfLow(originalImage);
 
-    // 5. Prepare detection input (aspect-ratio preserved, multiple of 32)
+    // 5. Prepare detection input (aspect-ratio preserved, multiple of 32, max dimension 960)
     final detDimensions = _computeDetDimensions(
-      originalImage.width,
-      originalImage.height,
+      enhancedImage.width,
+      enhancedImage.height,
     );
     final detWidth = detDimensions.width;
     final detHeight = detDimensions.height;
 
     final detResized = img.copyResize(
-      originalImage,
+      enhancedImage,
       width: detWidth,
       height: detHeight,
       interpolation: img.Interpolation.linear,
@@ -269,36 +295,38 @@ class PaddleOcrEngine implements OcrEngine {
       probMap: flatProbMap,
       detWidth: detWidth,
       detHeight: detHeight,
-      origWidth: originalImage.width,
-      origHeight: originalImage.height,
+      origWidth: enhancedImage.width,
+      origHeight: enhancedImage.height,
     );
 
     // 9. If no boxes detected, fallback to strip scanning to avoid silent drops
     final boxesToProcess = detectedBoxes.isNotEmpty
         ? detectedBoxes
-        : _generateFallbackBoxes(originalImage.width, originalImage.height);
+        : _generateFallbackBoxes(enhancedImage.width, enhancedImage.height);
 
-    // 10. Sort boxes in natural reading order
+    // 10. Sort boxes in natural reading order with column-awareness
     final sortedBoxes = _sortBoxesReadingOrder(boxesToProcess);
 
     // 11. Run recognition on each box crop sequentially
     final recognizedLines = <String>[];
+    final observations = <OcrObservation>[];
 
     for (final box in sortedBoxes) {
       final cropW = box.width;
       final cropH = box.height;
       if (cropW < 4 || cropH < 4) continue;
 
+      // Crop directly from high-resolution enhanced image to preserve character glyphs
       final crop = img.copyCrop(
-        originalImage,
+        enhancedImage,
         x: box.minX,
         y: box.minY,
         width: cropW,
         height: cropH,
       );
 
-      // Scale to fixed height 48 for PP-OCRv5 mobile rec (minimum width 32 to prevent character compression)
-      final recWidth = (48 * cropW / cropH).round().clamp(32, 960);
+      // Scale to fixed height 48 for PP-OCRv5 mobile rec (allow up to 1600px width for long emails/URLs)
+      final recWidth = (48 * cropW / cropH).round().clamp(32, 1600);
       final recResized = img.copyResize(
         crop,
         width: recWidth,
@@ -336,10 +364,47 @@ class PaddleOcrEngine implements OcrEngine {
         final recOutputTensor = recOutputs.values.first;
         final flatLogits = await recOutputTensor.asFlattenedList();
 
-        final lineText = _decodeCtcLogits(flatLogits, dict);
-        final trimmed = lineText.trim();
+        final decoded = _decodeCtcLogits(flatLogits, dict);
+        final trimmed = decoded.text.trim();
         if (trimmed.isNotEmpty) {
           recognizedLines.add(trimmed);
+
+          final normBox = Rect.fromLTRB(
+            (box.minX / enhancedImage.width).clamp(0.0, 1.0),
+            (box.minY / enhancedImage.height).clamp(0.0, 1.0),
+            (box.maxX / enhancedImage.width).clamp(0.0, 1.0),
+            (box.maxY / enhancedImage.height).clamp(0.0, 1.0),
+          );
+
+          final midY = (normBox.top + normBox.bottom) / 2.0;
+          final midX = (normBox.left + normBox.right) / 2.0;
+          String reg = 'middle';
+          if (midY < 0.33) {
+            reg = 'top';
+          } else if (midY > 0.66) {
+            reg = 'bottom';
+          }
+          if (midX < 0.35) {
+            reg = '$reg-left';
+          } else if (midX > 0.65) {
+            reg = '$reg-right';
+          }
+
+          observations.add(OcrObservation(
+            id: 'paddle_${observations.length}',
+            text: trimmed,
+            boundingBox: Rect.fromLTRB(
+              box.minX.toDouble(),
+              box.minY.toDouble(),
+              box.maxX.toDouble(),
+              box.maxY.toDouble(),
+            ),
+            normalizedBoundingBox: normBox,
+            confidence: decoded.confidence,
+            engine: name,
+            lineIndex: observations.length,
+            region: reg,
+          ));
         }
       } finally {
         await recInput?.dispose();
@@ -364,12 +429,14 @@ class PaddleOcrEngine implements OcrEngine {
       processingTime: stopwatch.elapsed,
       isSuccess: true,
       detectedLines: recognizedLines,
+      observations: observations,
       metadata: {
         'detDimensions': '${detWidth}x$detHeight',
         'detectedBoxesCount': detectedBoxes.length,
         'boxesProcessed': sortedBoxes.length,
-        'imageWidth': originalImage.width,
-        'imageHeight': originalImage.height,
+        'observationsCount': observations.length,
+        'imageWidth': enhancedImage.width,
+        'imageHeight': enhancedImage.height,
       },
     );
   }
@@ -431,8 +498,8 @@ class PaddleOcrEngine implements OcrEngine {
   ({int width, int height}) _computeDetDimensions(int origW, int origH) {
     double scale = 1.0;
     final maxDim = max(origW, origH);
-    if (maxDim > _maxImageDimension) {
-      scale = _maxImageDimension / maxDim;
+    if (maxDim > _maxDetDimension) {
+      scale = _maxDetDimension / maxDim;
     }
 
     int targetW = (origW * scale).round();
@@ -533,15 +600,15 @@ class PaddleOcrEngine implements OcrEngine {
           }
         }
 
-        // Noise filtering
+        // Noise filtering: tuned to preserve small phone/email text boxes
         final boxW = bMaxX - bMinX + 1;
         final boxH = bMaxY - bMinY + 1;
-        if (pixelCount >= 16 && boxW >= 4 && boxH >= 4) {
+        if (pixelCount >= 10 && boxW >= 3 && boxH >= 3) {
           final avgScore = sumScore / pixelCount;
           if (avgScore >= _dbNetMinBoxScore) {
-            // DBNet unclip expansion (20% horizontal, 28% vertical to preserve ascenders and descenders on difficult fonts)
-            final padW = (boxW * 0.20).round();
-            final padH = (boxH * 0.28).round();
+            // DBNet unclip expansion (25% horizontal, 35% vertical with minimum 3px padding to protect edge glyphs)
+            final padW = max(3, (boxW * 0.25).round());
+            final padH = max(3, (boxH * 0.35).round());
 
             final clampedMinX = max(0, bMinX - padW);
             final clampedMinY = max(0, bMinY - padH);
@@ -589,8 +656,80 @@ class PaddleOcrEngine implements OcrEngine {
     return boxes;
   }
 
+  /// Visible for testing reading-order layout algorithms.
+  @visibleForTesting
+  List<PaddleTextBox> sortBoxesReadingOrderForTesting(List<PaddleTextBox> boxes) =>
+      _sortBoxesReadingOrder(boxes);
+
   /// Sorts text boxes into natural reading order (top-to-bottom lines, left-to-right within line).
+  /// Preserves column independence so two-column cards or left/right blocks are not merged into single lines.
   List<PaddleTextBox> _sortBoxesReadingOrder(List<PaddleTextBox> boxes) {
+    if (boxes.length <= 1) return boxes;
+
+    final minLeft = boxes.map((b) => b.minX).reduce(min);
+    final maxRight = boxes.map((b) => b.maxX).reduce(max);
+    final cardW = maxRight - minLeft;
+
+    // Check if card has a distinct two-column layout
+    if (cardW > 200 && boxes.length >= 4) {
+      final midX = minLeft + cardW / 2.0;
+
+      // Identify header and footer boxes that span broadly across columns
+      final headerBoxes = <PaddleTextBox>[];
+      final footerBoxes = <PaddleTextBox>[];
+      final leftBoxes = <PaddleTextBox>[];
+      final rightBoxes = <PaddleTextBox>[];
+
+      // Find vertical overlap zone of candidate columns
+      final nonSpanning = boxes.where((b) => b.width < cardW * 0.65).toList();
+      final candLeft = nonSpanning.where((b) => b.centerX < midX).toList();
+      final candRight = nonSpanning.where((b) => b.centerX >= midX).toList();
+
+      if (candLeft.length >= 2 && candRight.length >= 2) {
+        final leftMaxX = candLeft.map((b) => b.maxX).reduce(max);
+        final rightMinX = candRight.map((b) => b.minX).reduce(min);
+
+        // Clear horizontal separation between columns
+        if (rightMinX >= leftMaxX - (cardW * 0.08)) {
+          final leftMinY = candLeft.map((b) => b.minY).reduce(min);
+          final leftMaxY = candLeft.map((b) => b.maxY).reduce(max);
+          final rightMinY = candRight.map((b) => b.minY).reduce(min);
+          final rightMaxY = candRight.map((b) => b.maxY).reduce(max);
+
+          final colTop = min(leftMinY, rightMinY);
+          final colBottom = max(leftMaxY, rightMaxY);
+
+          for (final box in boxes) {
+            final isSpanning = box.width >= cardW * 0.65;
+            if (isSpanning && box.maxY <= colTop + (colBottom - colTop) * 0.25) {
+              headerBoxes.add(box);
+            } else if (isSpanning && box.minY >= colBottom - (colBottom - colTop) * 0.25) {
+              footerBoxes.add(box);
+            } else if (box.centerX < midX) {
+              leftBoxes.add(box);
+            } else {
+              rightBoxes.add(box);
+            }
+          }
+
+          // Combine: Header -> Left Column -> Right Column -> Footer
+          final result = <PaddleTextBox>[];
+          result.addAll(_sortBoxesInBlock(headerBoxes));
+          result.addAll(_sortBoxesInBlock(leftBoxes));
+          result.addAll(_sortBoxesInBlock(rightBoxes));
+          result.addAll(_sortBoxesInBlock(footerBoxes));
+          return result;
+        }
+      }
+    }
+
+    // Default single-column / fallback reading order
+    return _sortBoxesInBlock(boxes);
+  }
+
+  /// Sorts a set of boxes belonging to a single column or layout block
+  /// by grouping into visual lines (top-to-bottom) and sorting left-to-right within each line.
+  List<PaddleTextBox> _sortBoxesInBlock(List<PaddleTextBox> boxes) {
     if (boxes.length <= 1) return boxes;
 
     final sorted = List<PaddleTextBox>.from(boxes)
@@ -604,7 +743,7 @@ class PaddleOcrEngine implements OcrEngine {
         final avgCenterY =
             line.fold<double>(0.0, (s, b) => s + b.centerY) / line.length;
 
-        if ((box.centerY - avgCenterY).abs() < avgH * 0.5) {
+        if ((box.centerY - avgCenterY).abs() < avgH * 0.55) {
           line.add(box);
           addedToLine = true;
           break;
@@ -625,13 +764,20 @@ class PaddleOcrEngine implements OcrEngine {
     return result;
   }
 
-  /// Performs CTC greedy decoding on output logits.
-  String _decodeCtcLogits(List<dynamic> flatLogits, List<String> dictionary) {
+  /// Performs CTC greedy decoding on output logits and calculates average character confidence.
+  DecodedCtcResult _decodeCtcLogits(
+    List<dynamic> flatLogits,
+    List<String> dictionary,
+  ) {
     final totalValues = flatLogits.length;
     final timeSteps = totalValues ~/ _vocabularySize;
-    if (timeSteps <= 0) return '';
+    if (timeSteps <= 0) {
+      return const DecodedCtcResult(text: '', confidence: 0.0);
+    }
 
     final chars = <String>[];
+    double totalProb = 0.0;
+    int emittedCount = 0;
     int prevIndex = -1;
 
     for (int t = 0; t < timeSteps; t++) {
@@ -651,17 +797,36 @@ class PaddleOcrEngine implements OcrEngine {
 
       // CTC Collapse: skip blank (index 0) and identical consecutive tokens
       if (maxIdx != 0 && maxIdx != prevIndex) {
+        // Approximate softmax probability for the winning token
+        double sumExp = 0.0;
+        for (int v = 0; v < _vocabularySize; v++) {
+          final val = (flatLogits[stepOffset + v] as num).toDouble();
+          final diff = val - maxLogit;
+          if (diff > -10.0) {
+            sumExp += exp(diff);
+          }
+        }
+        final prob = sumExp > 0 ? (1.0 / sumExp).clamp(0.01, 1.0) : 0.85;
+
         if (maxIdx == _spaceTokenIndex) {
           chars.add(' ');
         } else if (maxIdx < dictionary.length) {
           chars.add(dictionary[maxIdx]);
+          totalProb += prob;
+          emittedCount++;
         }
       }
 
       prevIndex = maxIdx;
     }
 
-    return chars.join('');
+    final text = chars.join('');
+    final confidence = emittedCount > 0 ? (totalProb / emittedCount) : 0.85;
+
+    return DecodedCtcResult(
+      text: text,
+      confidence: confidence.clamp(0.0, 1.0),
+    );
   }
 
   @override

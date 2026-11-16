@@ -296,6 +296,17 @@ class _BusinessCardCameraScreenState extends State<BusinessCardCameraScreen>
     });
 
     try {
+      // Phase 3: Camera focus & exposure stabilization where supported
+      try {
+        if (controller.value.focusMode != FocusMode.locked) {
+          await controller.setFocusMode(FocusMode.auto);
+        }
+        // Brief pause for macro autofocus stabilization on business card text
+        await Future.delayed(const Duration(milliseconds: 180));
+      } catch (_) {
+        // Fallback when driver does not support programmatic focus mode
+      }
+
       await PendingCardCaptureStore.savePendingCapture(
         side: _currentSide,
       );

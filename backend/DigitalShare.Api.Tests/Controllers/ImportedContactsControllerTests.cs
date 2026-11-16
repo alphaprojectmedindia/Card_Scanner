@@ -535,4 +535,317 @@ public class ImportedContactsControllerTests : IClassFixture<CustomWebApplicatio
         Assert.Equal("3333333333", updated.PhoneNumbers[0].Number);
         Assert.Empty(updated.EmailAddresses);
     }
+
+    [Fact]
+    public async Task TEST19_SaveImportedCard_ExactMaxLengths_Succeeds()
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        var request = new SaveImportedContactRequest
+        {
+            FullName = new string('A', 100),
+            Company = new string('B', 100),
+            JobTitle = new string('C', 100),
+            Website = "https://" + new string('d', 244) + ".com", // 8 + 244 + 4 = 256
+            Address = new string('E', 500),
+            PhoneNumbers = new List<ImportedContactPhoneDto>
+            {
+                new() { Number = "+1" + new string('9', 48), Label = new string('L', 50) } // 50 chars
+            },
+            EmailAddresses = new List<ImportedContactEmailDto>
+            {
+                new() { Email = new string('a', 244) + "@example.com", Label = new string('M', 50) } // 244 + 12 = 256 chars
+            }
+        };
+
+        var response = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, request));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<ImportedContactResponse>();
+        Assert.NotNull(created);
+        Assert.Equal(100, created.FullName?.Length);
+        Assert.Equal(100, created.Company?.Length);
+        Assert.Equal(100, created.JobTitle?.Length);
+        Assert.Equal(256, created.Website?.Length);
+        Assert.Equal(500, created.Address?.Length);
+        Assert.Equal(50, created.PhoneNumbers[0].Number.Length);
+        Assert.Equal(50, created.PhoneNumbers[0].Label?.Length);
+        Assert.Equal(256, created.EmailAddresses[0].Email.Length);
+        Assert.Equal(50, created.EmailAddresses[0].Label?.Length);
+    }
+
+    [Theory]
+    [InlineData("FullName", 101)]
+    [InlineData("Company", 101)]
+    [InlineData("JobTitle", 101)]
+    [InlineData("Website", 257)]
+    [InlineData("Address", 501)]
+    public async Task TEST20_SaveImportedCard_FieldExceedingMaxLength_ReturnsBadRequest(string field, int length)
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        var request = new SaveImportedContactRequest
+        {
+            FullName = field == "FullName" ? new string('A', length) : "Valid Name",
+            Company = field == "Company" ? new string('B', length) : "Valid Company",
+            JobTitle = field == "JobTitle" ? new string('C', length) : "Valid Title",
+            Website = field == "Website" ? new string('w', length) : "www.valid.com",
+            Address = field == "Address" ? new string('E', length) : "Valid Address",
+            PhoneNumbers = new List<ImportedContactPhoneDto>
+            {
+                new() { Number = "+91 98765 43210" }
+            }
+        };
+
+        var response = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, request));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TEST21_SaveImportedCard_PhoneOrEmailExceedingMaxLength_ReturnsBadRequest()
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        // Phone number > 50
+        var reqPhoneOver = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            PhoneNumbers = new() { new() { Number = "+1" + new string('9', 50) } } // 52 chars
+        };
+        var res1 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, reqPhoneOver));
+        Assert.Equal(HttpStatusCode.BadRequest, res1.StatusCode);
+
+        // Phone label > 50
+        var reqPhoneLabelOver = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            PhoneNumbers = new() { new() { Number = "+1 555 123 4567", Label = new string('L', 51) } }
+        };
+        var res2 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, reqPhoneLabelOver));
+        Assert.Equal(HttpStatusCode.BadRequest, res2.StatusCode);
+
+        // Email > 256
+        var reqEmailOver = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            EmailAddresses = new() { new() { Email = new string('e', 246) + "@example.com" } } // 258 chars
+        };
+        var res3 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, reqEmailOver));
+        Assert.Equal(HttpStatusCode.BadRequest, res3.StatusCode);
+
+        // Email label > 50
+        var reqEmailLabelOver = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            EmailAddresses = new() { new() { Email = "valid@example.com", Label = new string('L', 51) } }
+        };
+        var res4 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, reqEmailLabelOver));
+        Assert.Equal(HttpStatusCode.BadRequest, res4.StatusCode);
+    }
+
+    [Fact]
+    public async Task TEST22_SaveImportedCard_MissingOrWhitespaceRequiredPhoneOrEmail_ReturnsBadRequest()
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        // Phone with empty number
+        var emptyPhoneReq = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            PhoneNumbers = new() { new() { Number = "" } }
+        };
+        var res1 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, emptyPhoneReq));
+        Assert.Equal(HttpStatusCode.BadRequest, res1.StatusCode);
+
+        // Phone with whitespace number
+        var wsPhoneReq = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            PhoneNumbers = new() { new() { Number = "   " } }
+        };
+        var res2 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, wsPhoneReq));
+        Assert.Equal(HttpStatusCode.BadRequest, res2.StatusCode);
+
+        // Email with empty address
+        var emptyEmailReq = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            EmailAddresses = new() { new() { Email = "" } }
+        };
+        var res3 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, emptyEmailReq));
+        Assert.Equal(HttpStatusCode.BadRequest, res3.StatusCode);
+
+        // Email with whitespace address
+        var wsEmailReq = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            EmailAddresses = new() { new() { Email = "   " } }
+        };
+        var res4 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, wsEmailReq));
+        Assert.Equal(HttpStatusCode.BadRequest, res4.StatusCode);
+
+        // Completely empty / whitespace contact
+        var wsContactReq = new SaveImportedContactRequest
+        {
+            FullName = "   ",
+            Company = "   "
+        };
+        var res5 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, wsContactReq));
+        Assert.Equal(HttpStatusCode.BadRequest, res5.StatusCode);
+    }
+
+    [Fact]
+    public async Task TEST23_SaveImportedCard_InvalidEmailOrPhoneFormat_ReturnsBadRequest()
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        // Invalid email format
+        var badEmailReq = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            EmailAddresses = new() { new() { Email = "not-an-email" } }
+        };
+        var res1 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, badEmailReq));
+        Assert.Equal(HttpStatusCode.BadRequest, res1.StatusCode);
+
+        // Invalid phone format
+        var badPhoneReq = new SaveImportedContactRequest
+        {
+            FullName = "Valid Name",
+            PhoneNumbers = new() { new() { Number = "abcxyz!@#$" } }
+        };
+        var res2 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, badPhoneReq));
+        Assert.Equal(HttpStatusCode.BadRequest, res2.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("+1-555-123-4567")]
+    [InlineData("+44 20 7946 0991")]
+    [InlineData("+91 98765 43210")]
+    [InlineData("+81 3 1234 5678")]
+    [InlineData("(02) 1234 5678")]
+    [InlineData("1234567890")]
+    public async Task TEST24_SaveImportedCard_ValidInternationalPhoneFormats_ReturnsCreated(string phoneNumber)
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        var req = new SaveImportedContactRequest
+        {
+            FullName = "International User",
+            PhoneNumbers = new() { new() { Number = phoneNumber } }
+        };
+
+        var response = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token, req));
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TEST25_UpdateImportedCard_ValidationRulesEnforced_ReturnsBadRequest()
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        // Create valid card first
+        var createRes = await _client.SendAsync(CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token,
+            new SaveImportedContactRequest
+            {
+                FullName = "Initial Contact",
+                PhoneNumbers = new() { new() { Number = "+91 98765 43210" } }
+            }));
+        var created = await createRes.Content.ReadFromJsonAsync<ImportedContactResponse>();
+        Assert.NotNull(created);
+
+        // Update with FullName > 100
+        var updateOverLength = new UpdateImportedContactRequest
+        {
+            FullName = new string('Z', 101),
+            PhoneNumbers = new() { new() { Number = "+91 98765 43210" } }
+        };
+        var res1 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Put, $"/api/imported-contacts/{created.Id}", auth.Token, updateOverLength));
+        Assert.Equal(HttpStatusCode.BadRequest, res1.StatusCode);
+
+        // Update with invalid email
+        var updateBadEmail = new UpdateImportedContactRequest
+        {
+            FullName = "Valid Name",
+            EmailAddresses = new() { new() { Email = "not-an-email" } }
+        };
+        var res2 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Put, $"/api/imported-contacts/{created.Id}", auth.Token, updateBadEmail));
+        Assert.Equal(HttpStatusCode.BadRequest, res2.StatusCode);
+
+        // Update with completely empty/whitespace contact
+        var updateEmpty = new UpdateImportedContactRequest
+        {
+            FullName = "   ",
+            Company = "   "
+        };
+        var res3 = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Put, $"/api/imported-contacts/{created.Id}", auth.Token, updateEmpty));
+        Assert.Equal(HttpStatusCode.BadRequest, res3.StatusCode);
+    }
+
+    [Fact]
+    public async Task TEST26_UpdateImportedCard_ExactMaxLengths_Succeeds()
+    {
+        var auth = await RegisterUserAsync($"user_{Guid.NewGuid()}@example.com");
+
+        var createRes = await _client.SendAsync(CreateAuthenticatedRequest(HttpMethod.Post, "/api/imported-contacts", auth.Token,
+            new SaveImportedContactRequest
+            {
+                FullName = "Initial Contact",
+                PhoneNumbers = new() { new() { Number = "+91 98765 43210" } }
+            }));
+        var created = await createRes.Content.ReadFromJsonAsync<ImportedContactResponse>();
+        Assert.NotNull(created);
+
+        var updateReq = new UpdateImportedContactRequest
+        {
+            FullName = new string('A', 100),
+            Company = new string('B', 100),
+            JobTitle = new string('C', 100),
+            Website = "https://" + new string('d', 244) + ".com",
+            Address = new string('E', 500),
+            PhoneNumbers = new List<ImportedContactPhoneDto>
+            {
+                new() { Number = "+1" + new string('9', 48), Label = new string('L', 50) }
+            },
+            EmailAddresses = new List<ImportedContactEmailDto>
+            {
+                new() { Email = new string('a', 244) + "@example.com", Label = new string('M', 50) }
+            }
+        };
+
+        var updateRes = await _client.SendAsync(
+            CreateAuthenticatedRequest(HttpMethod.Put, $"/api/imported-contacts/{created.Id}", auth.Token, updateReq));
+
+        Assert.Equal(HttpStatusCode.OK, updateRes.StatusCode);
+        var updated = await updateRes.Content.ReadFromJsonAsync<ImportedContactResponse>();
+        Assert.NotNull(updated);
+        Assert.Equal(100, updated.FullName?.Length);
+        Assert.Equal(100, updated.Company?.Length);
+        Assert.Equal(100, updated.JobTitle?.Length);
+        Assert.Equal(256, updated.Website?.Length);
+        Assert.Equal(500, updated.Address?.Length);
+        Assert.Equal(50, updated.PhoneNumbers[0].Number.Length);
+        Assert.Equal(50, updated.PhoneNumbers[0].Label?.Length);
+        Assert.Equal(256, updated.EmailAddresses[0].Email.Length);
+        Assert.Equal(50, updated.EmailAddresses[0].Label?.Length);
+    }
 }

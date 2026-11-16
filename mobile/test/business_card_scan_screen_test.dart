@@ -5,6 +5,7 @@ import 'package:digital_share/models/ocr_side_result.dart';
 import 'package:digital_share/screens/scan/business_card_review_screen.dart';
 import 'package:digital_share/screens/scan/business_card_scan_screen.dart';
 import 'package:digital_share/services/business_card_ocr_service.dart';
+import 'package:digital_share/services/card_geometry_service.dart';
 import 'package:digital_share/services/pending_card_capture_store.dart';
 
 class FakeImagePicker extends ImagePicker {
@@ -47,6 +48,7 @@ class FakeOcrService implements IBusinessCardOcrService {
     required String imagePath,
     required CardSide side,
     String? source,
+    ViewfinderNormalizedRect? viewfinderRoi,
   }) async {
     final text = side == CardSide.front
         ? returnText

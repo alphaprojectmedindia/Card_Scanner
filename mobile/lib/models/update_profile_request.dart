@@ -8,6 +8,7 @@ class UpdateProfileRequest {
   final String? address;
   final String? bio;
   final String? profilePhotoUrl;
+  final bool? isPublic;
 
   UpdateProfileRequest({
     this.fullName,
@@ -19,6 +20,7 @@ class UpdateProfileRequest {
     this.address,
     this.bio,
     this.profilePhotoUrl,
+    this.isPublic,
   });
 
   Map<String, dynamic> toJson() {
@@ -32,6 +34,7 @@ class UpdateProfileRequest {
       'address': address?.trim().isEmpty == true ? null : address?.trim(),
       'bio': bio?.trim().isEmpty == true ? null : bio?.trim(),
       'profilePhotoUrl': profilePhotoUrl?.trim().isEmpty == true ? null : profilePhotoUrl?.trim(),
+      if (isPublic != null) 'isPublic': isPublic,
     };
   }
 }

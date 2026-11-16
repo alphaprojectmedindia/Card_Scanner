@@ -4,6 +4,7 @@ import 'package:digital_share/models/business_card_data.dart';
 import 'package:digital_share/models/business_card_email.dart';
 import 'package:digital_share/models/business_card_phone.dart';
 import 'package:digital_share/models/check_duplicate_result.dart';
+import 'package:digital_share/models/field_evidence.dart';
 import 'package:digital_share/models/imported_contact.dart';
 import 'package:digital_share/models/saved_connection.dart';
 import 'package:digital_share/screens/connections/connections_screen.dart';
@@ -51,7 +52,25 @@ class MockImportedContactService extends ImportedContactService {
   }
 
   @override
-  Future<ImportedContact> saveContact(Map<String, dynamic> contactData) async {
+  Future<ImportedContact> saveContact(
+    Map<String, dynamic> contactData, {
+    String? frontImagePath,
+    String? backImagePath,
+    String? rawRecognizedText,
+    String? frontRawText,
+    String? backRawText,
+    List<Map<String, dynamic>> frontObservations = const [],
+    List<Map<String, dynamic>> backObservations = const [],
+    String? ocrEngineName,
+    String? ocrModelVersion,
+    double? overallOcrConfidence,
+    Map<String, FieldEvidence> fieldEvidence = const {},
+    String? parserVersion,
+    String? preprocessingVersion,
+    String? imageFingerprint,
+    String? imageDHash,
+    String? notes,
+  }) async {
     saveContactCalled = true;
     if (shouldThrowError) {
       throw ApiException('Failed to save contact');

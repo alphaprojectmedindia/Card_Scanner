@@ -1,15 +1,34 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../models/business_card_data.dart';
+import '../../models/business_card_email.dart';
+import '../../models/business_card_phone.dart';
+import '../../models/card_analysis_result.dart';
 import '../../models/ocr_side_result.dart';
+import '../../models/scan_execution_diagnostics.dart';
 import '../../services/business_card_ocr_service.dart';
 import '../../services/business_card_parser.dart';
+import '../../services/card_analysis_decision_service.dart';
+import '../../services/card_analysis_service.dart';
+import '../../services/card_geometry_service.dart';
 import '../../services/card_image_normalization_service.dart';
 import '../../services/image_quality_service.dart';
 import '../../services/imported_contact_service.dart';
+import '../../services/ocr/duplicate_card_detector.dart';
+import '../../services/ocr/field_confidence_evaluator.dart';
+import '../../services/ocr/gemini_ocr_reconciliation_engine.dart';
+import '../../services/ocr/hybrid_ocr_pipeline.dart';
+import '../../services/ocr/image_hash_service.dart';
+import '../../services/ocr/local_correction_learning_service.dart';
+import '../../services/ocr/same_card_cache_reconciler.dart';
 import '../../services/pending_card_capture_store.dart';
+import '../../services/secure_storage_service.dart';
+import '../../services/storage/local_scan_cache_manager.dart';
+import '../../services/storage/offline_scan_queue_service.dart';
 import '../../theme/app_spacing.dart';
 import 'business_card_camera_screen.dart';
 import 'business_card_review_screen.dart';
@@ -22,6 +41,18 @@ class BusinessCardScanScreen extends StatefulWidget {
   final BusinessCardParser? parser;
   final ImportedContactService? importedContactService;
   final ImageQualityService? qualityService;
+  final CardAnalysisService? analysisService;
+  final CardAnalysisDecisionService? decisionService;
+  final LocalScanCacheManager? scanCacheManager;
+  final DuplicateCardDetector? duplicateDetector;
+  final FieldConfidenceEvaluator? fieldEvaluator;
+  final ImageHashService? hashService;
+  final LocalCorrectionLearningService? learningService;
+  final SameCardCacheReconciler? cacheReconciler;
+  final GeminiOcrReconciliationEngine? reconciliationEngine;
+  final OfflineScanQueueService? offlineScanQueueService;
+  final bool allowExactImageCacheReuse;
+  final String? userId;
 
   const BusinessCardScanScreen({
     super.key,
@@ -30,6 +61,18 @@ class BusinessCardScanScreen extends StatefulWidget {
     this.parser,
     this.importedContactService,
     this.qualityService,
+    this.analysisService,
+    this.decisionService,
+    this.scanCacheManager,
+    this.duplicateDetector,
+    this.fieldEvaluator,
+    this.hashService,
+    this.learningService,
+    this.cacheReconciler,
+    this.reconciliationEngine,
+    this.offlineScanQueueService,
+    this.allowExactImageCacheReuse = false,
+    this.userId,
   });
 
   @override
@@ -43,11 +86,25 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
   late final BusinessCardParser _parser;
   late final ImportedContactService _contactService;
   late final ImageQualityService _qualityService;
+  late final CardAnalysisService _analysisService;
+  late final CardAnalysisDecisionService _decisionService;
+  late final LocalScanCacheManager _scanCacheManager;
+  late final DuplicateCardDetector _duplicateDetector;
+  late final FieldConfidenceEvaluator _fieldEvaluator;
+  late final ImageHashService _hashService;
+  late final LocalCorrectionLearningService _learningService;
+  late final SameCardCacheReconciler _cacheReconciler;
+  late final GeminiOcrReconciliationEngine _reconciliationEngine;
+  late final OfflineScanQueueService _offlineScanQueueService;
+  late final bool _allowExactCacheReuse;
+  String? _userId;
 
   String? _frontImagePath;
   String? _backImagePath;
   String? _frontImageSource;
   String? _backImageSource;
+  ViewfinderNormalizedRect? _frontViewfinderRoi;
+  ViewfinderNormalizedRect? _backViewfinderRoi;
   int _scanSessionId = 0;
   bool _isProcessing = false;
   String _processingTitle = 'Scanning business card...';
@@ -58,6 +115,13 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Phase 3: Pre-warm on-device OCR engines in background on real devices
+    final bool isTestBinding = WidgetsBinding.instance.runtimeType.toString().contains('Test');
+    if (!isTestBinding &&
+        !Platform.environment.containsKey('FLUTTER_TEST') &&
+        !Platform.script.path.contains('_test.dart')) {
+      unawaited(HybridOcrPipeline.shared.prewarm());
+    }
     _ocrService = widget.ocrService ??
         BusinessCardOcrService(
           onProgressUpdate: (msg) {
@@ -70,9 +134,29 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
         );
     _imagePicker = widget.imagePicker ?? ImagePicker();
     _parser = widget.parser ?? const BusinessCardParser();
-    _contactService =
-        widget.importedContactService ?? ImportedContactService();
+    _scanCacheManager = widget.scanCacheManager ?? LocalScanCacheManager();
+    _learningService = widget.learningService ?? LocalCorrectionLearningService();
+    _contactService = widget.importedContactService ??
+        ImportedContactService(
+          scanCacheManager: _scanCacheManager,
+          learningService: _learningService,
+        );
     _qualityService = widget.qualityService ?? const ImageQualityService();
+    _decisionService =
+        widget.decisionService ?? const CardAnalysisDecisionService();
+    _analysisService = widget.analysisService ?? CardAnalysisService();
+    _hashService = widget.hashService ?? const ImageHashService();
+    _duplicateDetector = widget.duplicateDetector ??
+        DuplicateCardDetector(
+          repository: _contactService.localRepository,
+          hashService: _hashService,
+        );
+    _fieldEvaluator = widget.fieldEvaluator ?? const FieldConfidenceEvaluator();
+    _cacheReconciler = widget.cacheReconciler ?? const SameCardCacheReconciler();
+    _reconciliationEngine = widget.reconciliationEngine ?? const GeminiOcrReconciliationEngine();
+    _offlineScanQueueService = widget.offlineScanQueueService ?? OfflineScanQueueService();
+    _allowExactCacheReuse = widget.allowExactImageCacheReuse;
+    _userId = widget.userId;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkLostData();
@@ -97,6 +181,10 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
   void _deleteLocalFile(String? path) {
     if (path == null || path.isEmpty) return;
     try {
+      // Critical guard: Never delete files committed to permanent card storage
+      if (path.contains('/cards/images/') || path.contains(r'\cards\images\')) {
+        return;
+      }
       final tempDir = Directory.systemTemp.path;
       // Only delete if it is located inside system temp directory to protect user gallery files
       if (path.startsWith(tempDir)) {
@@ -198,10 +286,12 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
           if (res.side == CardSide.front) {
             _frontImagePath = res.imagePath;
             _frontImageSource = res.isFromGallery ? 'gallery' : 'camera';
+            _frontViewfinderRoi = res.viewfinderRoi;
             _showPhysicalOptions = false;
           } else {
             _backImagePath = res.imagePath;
             _backImageSource = res.isFromGallery ? 'gallery' : 'camera';
+            _backViewfinderRoi = res.viewfinderRoi;
           }
         });
       }
@@ -345,51 +435,468 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
     });
 
     try {
-      // 1. Process Front Side
-      final frontOcr = await _ocrService.processCardSide(
-        imagePath: _frontImagePath!,
-        side: CardSide.front,
-        source: _frontImageSource,
-      );
+      String currentUserId = _userId ?? 'default_user';
+      final bool isTestBinding =
+          WidgetsBinding.instance.runtimeType.toString().contains('Test') ||
+              Platform.environment.containsKey('FLUTTER_TEST');
+      if (!isTestBinding) {
+        try {
+          final storedUid = await SecureStorageService().getUserId();
+          if (storedUid != null && storedUid.isNotEmpty) {
+            currentUserId = storedUid;
+          } else {
+            // Production isolation: Never use static 'default_user'
+            currentUserId = await SecureStorageService().getAnonymousInstallId();
+          }
+        } catch (_) {}
+      }
 
-      if (!mounted || _scanSessionId != currentSession) return;
+      // 0. Compute front image hashes for instant duplicate check and caching
+      String? frontFingerprint;
+      String? frontDHash;
+      if (File(_frontImagePath!).existsSync()) {
+        frontFingerprint = await _hashService.computeFileSha256(_frontImagePath!);
+        frontDHash = await _hashService.computeFileDHash(_frontImagePath!);
+      }
 
-      OcrSideResult? backOcr;
-      if (isDualSide) {
-        backOcr = await _ocrService.processCardSide(
-          imagePath: _backImagePath!,
-          side: CardSide.back,
-          source: _backImageSource,
+      // Stage 1: Exact image match against local permanent storage (ONLY if allowExactCacheReuse is explicitly enabled)
+      if (_allowExactCacheReuse && frontFingerprint != null && frontFingerprint.isNotEmpty) {
+        final exactMatch = await _duplicateDetector.checkExactFingerprint(
+          frontFingerprint,
+          userId: currentUserId,
         );
-      }
+        if (kDebugMode) {
+          debugPrint('[Scan Diagnostics] Fingerprint: ${frontFingerprint.substring(0, 12)}... | Stage 1 Exact Match: ${exactMatch.isDuplicate ? "HIT (Restoring Saved Contact)" : "MISS"}');
+        }
+        if (exactMatch.isDuplicate && exactMatch.matchedContact != null) {
+          setState(() {
+            _isProcessing = false;
+          });
+          if (!mounted || _scanSessionId != currentSession) return;
 
-      if (!mounted || _scanSessionId != currentSession) return;
-
-      // Verify readable text exists
-      if (frontOcr.isEmpty && (backOcr == null || backOcr.isEmpty)) {
-        setState(() {
-          _isProcessing = false;
-        });
-        _showNoTextDialog();
-        return;
-      }
-
-      if (isDualSide && frontOcr.isNotEmpty && backOcr!.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No readable text found on back side. Continuing with front side.',
+          final shouldReview = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Previously Scanned Card'),
+              content: Text(
+                'This exact card was previously scanned for "${exactMatch.matchedContact!.displayName}".\n\nWould you like to review the saved details?',
+              ),
+              actions: [
+                TextButton(
+                  key: const Key('exact_card_rescan_button'),
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Rescan'),
+                ),
+                FilledButton(
+                  key: const Key('exact_card_review_button'),
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Review Saved Card'),
+                ),
+              ],
             ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+          );
+
+          if (shouldReview == true && mounted) {
+            await Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => BusinessCardReviewScreen(
+                  cardData: BusinessCardData(
+                    fullName: exactMatch.matchedContact!.fullName,
+                    company: exactMatch.matchedContact!.company,
+                    jobTitle: exactMatch.matchedContact!.jobTitle,
+                    website: exactMatch.matchedContact!.website,
+                    address: exactMatch.matchedContact!.address,
+                    phoneNumbers: exactMatch.matchedContact!.phoneNumbers
+                        .map((p) => BusinessCardPhone(number: p.number, label: p.label ?? 'Mobile'))
+                        .toList(),
+                    emailAddresses: exactMatch.matchedContact!.emailAddresses
+                        .map((e) => BusinessCardEmail(email: e.email, label: e.label ?? 'Work'))
+                        .toList(),
+                  ),
+                  contactService: _contactService,
+                  imageFingerprint: frontFingerprint,
+                  imageDHash: frontDHash,
+                  frontImagePath: _frontImagePath,
+                  backImagePath: _backImagePath,
+                  learningService: _learningService,
+                ),
+              ),
+            );
+            return;
+          }
+
+          setState(() {
+            _isProcessing = true;
+          });
+        }
       }
 
-      // Parse OCR output into structured BusinessCardData
-      final cardData = _parser.parseDualSided(
-        front: frontOcr,
-        back: backOcr,
+      // 1. Process Front Side & Back Side (with persistent scan cache check)
+      BusinessCardData? localCardData;
+      OcrSideResult? frontOcr;
+      OcrSideResult? backOcr;
+      CachedScanEntry? cachedScan;
+
+      if (_allowExactCacheReuse && frontFingerprint != null && frontFingerprint.isNotEmpty) {
+        cachedScan = await _scanCacheManager.getScanResult(
+          frontFingerprint,
+          userId: currentUserId,
+        );
+        if (cachedScan != null) {
+          localCardData = cachedScan.parsedData;
+          final frontLines = <OcrLineMetadata>[];
+          if (cachedScan.frontObservations.isNotEmpty) {
+            for (int i = 0; i < cachedScan.frontObservations.length; i++) {
+              final obs = cachedScan.frontObservations[i];
+              final boxMap = obs['boundingBox'] as Map<String, dynamic>?;
+              final box = boxMap != null
+                  ? Rect.fromLTWH(
+                      (boxMap['left'] as num?)?.toDouble() ?? 0.0,
+                      (boxMap['top'] as num?)?.toDouble() ?? 0.0,
+                      (boxMap['width'] as num?)?.toDouble() ?? 0.0,
+                      (boxMap['height'] as num?)?.toDouble() ?? 0.0,
+                    )
+                  : Rect.zero;
+              frontLines.add(OcrLineMetadata(
+                text: obs['text']?.toString() ?? '',
+                side: CardSide.front,
+                lineIndex: i,
+                blockIndex: 0,
+                boundingBox: box,
+                confidence: (obs['confidence'] as num?)?.toDouble() ?? 1.0,
+              ));
+            }
+          } else {
+            final rawList = cachedScan.frontLines.isNotEmpty
+                ? cachedScan.frontLines
+                : cachedScan.frontRawText
+                    .split(RegExp(r'\r?\n'))
+                    .map((l) => l.trim())
+                    .where((l) => l.isNotEmpty)
+                    .toList();
+            for (int i = 0; i < rawList.length; i++) {
+              frontLines.add(OcrLineMetadata(
+                text: rawList[i],
+                side: CardSide.front,
+                lineIndex: i,
+                blockIndex: 0,
+                boundingBox: Rect.zero,
+              ));
+            }
+          }
+
+          frontOcr = OcrSideResult(
+            rawText: cachedScan.frontRawText,
+            side: CardSide.front,
+            imagePath: _frontImagePath!,
+            lines: frontLines,
+          );
+          if (cachedScan.backRawText != null && isDualSide) {
+            final backLines = <OcrLineMetadata>[];
+            if (cachedScan.backObservations.isNotEmpty) {
+              for (int i = 0; i < cachedScan.backObservations.length; i++) {
+                final obs = cachedScan.backObservations[i];
+                final boxMap = obs['boundingBox'] as Map<String, dynamic>?;
+                final box = boxMap != null
+                    ? Rect.fromLTWH(
+                        (boxMap['left'] as num?)?.toDouble() ?? 0.0,
+                        (boxMap['top'] as num?)?.toDouble() ?? 0.0,
+                        (boxMap['width'] as num?)?.toDouble() ?? 0.0,
+                        (boxMap['height'] as num?)?.toDouble() ?? 0.0,
+                      )
+                    : Rect.zero;
+                backLines.add(OcrLineMetadata(
+                  text: obs['text']?.toString() ?? '',
+                  side: CardSide.back,
+                  lineIndex: i,
+                  blockIndex: 0,
+                  boundingBox: box,
+                  confidence: (obs['confidence'] as num?)?.toDouble() ?? 1.0,
+                ));
+              }
+            } else {
+              final rawList = cachedScan.backLines.isNotEmpty
+                  ? cachedScan.backLines
+                  : cachedScan.backRawText!
+                      .split(RegExp(r'\r?\n'))
+                      .map((l) => l.trim())
+                      .where((l) => l.isNotEmpty)
+                      .toList();
+              for (int i = 0; i < rawList.length; i++) {
+                backLines.add(OcrLineMetadata(
+                  text: rawList[i],
+                  side: CardSide.back,
+                  lineIndex: i,
+                  blockIndex: 0,
+                  boundingBox: Rect.zero,
+                ));
+              }
+            }
+
+            backOcr = OcrSideResult(
+              rawText: cachedScan.backRawText!,
+              side: CardSide.back,
+              imagePath: _backImagePath!,
+              lines: backLines,
+            );
+          }
+        }
+      }
+
+      if (frontOcr == null) {
+        frontOcr = await _ocrService.processCardSide(
+          imagePath: _frontImagePath!,
+          side: CardSide.front,
+          source: _frontImageSource,
+          viewfinderRoi: _frontViewfinderRoi,
+        );
+
+        if (!mounted || _scanSessionId != currentSession) return;
+
+        if (isDualSide) {
+          backOcr = await _ocrService.processCardSide(
+            imagePath: _backImagePath!,
+            side: CardSide.back,
+            source: _backImageSource,
+            viewfinderRoi: _backViewfinderRoi,
+          );
+        }
+
+        if (!mounted || _scanSessionId != currentSession) return;
+
+        // Verify readable text exists
+        if (frontOcr.isEmpty && (backOcr == null || backOcr.isEmpty)) {
+          setState(() {
+            _isProcessing = false;
+          });
+          _showNoTextDialog();
+          return;
+        }
+
+        if (isDualSide && frontOcr.isNotEmpty && backOcr!.isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No readable text found on back side. Continuing with front side.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+
+        // Parse OCR output into structured BusinessCardData using local-first pipeline
+        localCardData = _parser.parseDualSided(
+          front: frontOcr,
+          back: backOcr,
+        );
+
+        if (frontFingerprint != null && frontFingerprint.isNotEmpty) {
+          await _scanCacheManager.putScanResult(
+            imageFingerprint: frontFingerprint,
+            userId: currentUserId,
+            frontRawText: frontOcr.rawText,
+            backRawText: backOcr?.rawText,
+            parsedData: localCardData,
+            frontObservations: frontOcr.observations,
+            backObservations: backOcr?.observations,
+            frontLines: frontOcr.lines.map((l) => l.text).toList(),
+            backLines: backOcr?.lines.map((l) => l.text).toList(),
+          );
+        }
+      }
+
+      // Priority 1 & 2: Search previously saved contacts for potential same-card matches
+      final similarityMatch = await _duplicateDetector.checkSimilarity(
+        cardData: localCardData!,
+        currentDHash: frontDHash,
+        userId: currentUserId,
       );
+
+      if (similarityMatch.isDuplicate && similarityMatch.matchedRecord != null) {
+        bool shouldAssimilate = similarityMatch.isDefinitiveMatch;
+        if (similarityMatch.isUncertainMatch) {
+          setState(() {
+            _isProcessing = false;
+          });
+          if (!mounted || _scanSessionId != currentSession) return;
+
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Similar Card Found'),
+              content: Text(
+                'A saved card for "${similarityMatch.matchedRecord!.fullName ?? 'this contact'}" appears similar.\n\nUse previous approved details to assist reading this card?',
+              ),
+              actions: [
+                TextButton(
+                  key: const Key('ignore_similar_card_button'),
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Read Fresh'),
+                ),
+                FilledButton(
+                  key: const Key('use_similar_card_button'),
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Use to Assist'),
+                ),
+              ],
+            ),
+          );
+
+          shouldAssimilate = confirmed == true;
+          setState(() {
+            _isProcessing = true;
+          });
+        }
+
+        if (shouldAssimilate) {
+          final reconResult = _cacheReconciler.reconcile(
+            newScanData: localCardData,
+            frontOcr: frontOcr,
+            backOcr: backOcr,
+            cachedRecord: similarityMatch.matchedRecord!,
+            matchConfidence: similarityMatch.confidence,
+          );
+          localCardData = reconResult.reconciledCardData;
+          if (kDebugMode) {
+            debugPrint('[Scan Diagnostics] Cache Reconciled: ${reconResult.improvementsApplied.length} improvements, ${reconResult.conflictsDetected.length} conflicts');
+          }
+        }
+      }
+
+      BusinessCardData finalCardData = localCardData;
+
+      // 2. Centralized Field-Level Confidence Evaluation
+      final confidenceReport = _fieldEvaluator.evaluate(
+        cardData: localCardData,
+        frontOcr: frontOcr,
+        backOcr: backOcr,
+      );
+
+      final decision = _decisionService.evaluate(
+        cardData: localCardData,
+        frontOcr: frontOcr,
+        backOcr: backOcr,
+      );
+
+      // Section 1: MANDATORY GEMINI EXECUTION POLICY (MAXIMUM ACCURACY PRIORITY)
+      // For EVERY new business-card scan:
+      // - Run PaddleOCR & Google ML Kit.
+      // - Run local parser.
+      // - Submit a FULL Gemini multimodal extraction request whenever internet connectivity is available.
+      // - Do not wait for confidence evaluator or heuristic triggers.
+      // - Do not skip because local OCR appears confident or fields were already identified.
+      final bool isOnline = _analysisService.isOnlineCheck == null || _analysisService.isOnlineCheck!();
+      final bool shouldInvokeGemini = isOnline;
+
+      bool stage1DecisionMade = true;
+      bool stage2BackendSubmitted = false;
+      bool stage3GeminiApiExecuted = false;
+      bool stage4GeminiResponseReceived = false;
+      bool stage5GeminiCorrectionAccepted = false;
+      CardAnalysisResult? analysisResult;
+
+      try {
+        if (shouldInvokeGemini) {
+          stage2BackendSubmitted = true;
+          setState(() {
+            _processingSubtitle = 'Interpreting card details with AI (Gemini Multimodal)...';
+          });
+
+          analysisResult = await _analysisService.analyzeFullMultimodal(
+            cardData: localCardData,
+            frontOcr: frontOcr,
+            backOcr: backOcr,
+            scanId: currentSession.toString(),
+          );
+
+          if (analysisResult != null) {
+            stage3GeminiApiExecuted = analysisResult.geminiApiExecuted;
+            if (!analysisResult.fallbackToLocalBaseline) {
+              stage4GeminiResponseReceived = true;
+            }
+          }
+        } else {
+          // Section 7: Offline Behavior - Enqueue scan for background Gemini processing
+          await _offlineScanQueueService.enqueueScan(
+            scanId: currentSession.toString(),
+            userId: currentUserId,
+            frontImagePath: _frontImagePath!,
+            backImagePath: _backImagePath,
+            frontSha256: frontFingerprint,
+            cardData: localCardData,
+          );
+        }
+
+        if (kDebugMode) {
+          debugPrint('[Scan Diagnostics] Cumulative Gemini API Calls: ${_analysisService.geminiApiCallCount}');
+          final pendingCount = (await _contactService.syncQueue.getPendingOperations()).length;
+          debugPrint('[Scan Diagnostics] Pending Sync Queue Size: $pendingCount');
+        }
+      } catch (err) {
+        if (kDebugMode) {
+          debugPrint('[Scan Diagnostics] Gemini AI non-blocking exception: $err');
+        }
+      }
+
+      // Section 4: Final Field-by-Field Evidence-Based Reconciliation Engine
+      final learnedCorrections = await _learningService.getExactImageCorrections(
+        imageFingerprint: frontFingerprint ?? '',
+        userId: currentUserId,
+      );
+
+      final reconResult = _reconciliationEngine.reconcile(
+        localCardData: localCardData,
+        frontOcr: frontOcr,
+        backOcr: backOcr,
+        geminiResult: analysisResult,
+        learnedCorrections: learnedCorrections,
+      );
+
+      finalCardData = reconResult.reconciledData;
+      if (reconResult.fieldsCorrectedByGemini > 0 || reconResult.fieldsDiscoveredByGemini > 0) {
+        stage5GeminiCorrectionAccepted = true;
+      }
+
+      // 17-point structured diagnostic audit trace
+      final baselineSummary = 'Name: "${localCardData.fullName}", Co: "${localCardData.company}", Job: "${localCardData.jobTitle}"';
+      final fieldConfSummary = 'Score: ${confidenceReport.overallScore} | CriticalUncertain: ${confidenceReport.hasLowConfidenceCriticalFields} | fullName: ${confidenceReport["fullName"]?.level.name}, company: ${confidenceReport["company"]?.level.name}';
+      final diffSummary = stage5GeminiCorrectionAccepted
+          ? 'Name: "${localCardData.fullName}" -> "${finalCardData.fullName}", Co: "${localCardData.company}" -> "${finalCardData.company}"'
+          : (stage4GeminiResponseReceived ? 'Baseline verified by Gemini (no field change)' : 'N/A (Gemini not invoked or failed)');
+      final acceptedSummary = 'Name: "${finalCardData.fullName}", Co: "${finalCardData.company}", Job: "${finalCardData.jobTitle}", Phones: ${finalCardData.phoneNumbers.length}, Emails: ${finalCardData.emailAddresses.length}';
+
+      final diagnostics = ScanExecutionDiagnostics(
+        scanId: _scanSessionId.toString(),
+        contactId: null,
+        exactCacheHit: cachedScan != null,
+        perceptualCacheAttempted: cachedScan == null,
+        perceptualCacheMatched: similarityMatch.isDuplicate && similarityMatch.matchedRecord != null,
+        ocrEngineResults: '${frontOcr.fallbackInvoked ? "PaddleOCR + ML Kit Fallback" : (frontOcr.metadata["engine"] ?? "PaddleOCR (PP-OCRv5 Mobile)")} (Front: ${frontOcr.lines.length} lines, Back: ${backOcr?.lines.length ?? 0} lines)',
+        parserOutputSummary: baselineSummary,
+        fieldConfidenceSummary: fieldConfSummary,
+        triggeredDecisionRules: decision.triggeredRules,
+        decisionOutcome: 'shouldInvoke: ${decision.shouldInvokeGemini}, mode: ${decision.mode.name}, primary: "${decision.primaryReason}"',
+        stage1DecisionMade: stage1DecisionMade,
+        stage2BackendSubmitted: stage2BackendSubmitted,
+        stage3GeminiApiExecuted: stage3GeminiApiExecuted,
+        stage4GeminiResponseReceived: stage4GeminiResponseReceived,
+        stage5GeminiCorrectionAccepted: stage5GeminiCorrectionAccepted,
+        imageUploadStatus: 'Front: ${frontOcr.imagePath.isNotEmpty ? "Available" : "Missing"}, Back: ${backOcr?.imagePath.isNotEmpty == true ? "Available" : "None"}',
+        analysisModeRequested: decision.mode.name,
+        modelNameReturned: analysisResult?.modelId,
+        promptTokens: analysisResult?.promptTokens,
+        candidateTokens: analysisResult?.candidateTokens,
+        totalTokens: analysisResult?.totalTokens,
+        rawGeminiExtractions: analysisResult != null ? 'Name: "${analysisResult.fullName?.value}", Co: "${analysisResult.company?.value}", Job: "${analysisResult.jobTitle?.value}"' : null,
+        baselineVsGeminiDiff: diffSummary,
+        finalAcceptedContactValues: acceptedSummary,
+      );
+
+      diagnostics.logToConsole();
+
+      final updatedNotes = List<String>.from(finalCardData.parsingNotes)
+        ..add(diagnostics.toAuditSummary());
+      finalCardData = finalCardData.copyWith(parsingNotes: updatedNotes);
 
       setState(() {
         _isProcessing = false;
@@ -397,12 +904,34 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
 
       if (!mounted || _scanSessionId != currentSession) return;
 
+      // Apply on-device learned corrections if available for this card fingerprint (Stage 5)
+      if (frontFingerprint != null && frontFingerprint.isNotEmpty) {
+        finalCardData = await _learningService.applyLearnedCorrectionsToCardData(
+          parsedData: finalCardData,
+          imageFingerprint: frontFingerprint,
+          userId: currentUserId,
+        );
+      }
+
+      if (!mounted) return;
+
       // Navigate to Review Details Screen
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => BusinessCardReviewScreen(
-            cardData: cardData,
+            cardData: finalCardData,
             contactService: _contactService,
+            imageFingerprint: frontFingerprint,
+            imageDHash: frontDHash,
+            frontImagePath: _frontImagePath,
+            backImagePath: _backImagePath,
+            frontObservations: frontOcr?.observations ?? const [],
+            backObservations: backOcr?.observations ?? const [],
+            ocrEngineName: (frontOcr != null && frontOcr.engineName.isNotEmpty)
+                ? frontOcr.engineName
+                : 'PaddleOCR (PP-OCRv5 Mobile)',
+            learningService: _learningService,
+            userId: currentUserId,
           ),
         ),
       );

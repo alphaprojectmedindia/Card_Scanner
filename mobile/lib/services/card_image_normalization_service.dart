@@ -58,6 +58,9 @@ class CardNormalizationResult {
   /// True if high-confidence card boundary was detected and perspective-rectified.
   final bool wasPerspectiveCorrected;
 
+  /// True if safe viewfinder ROI crop was applied as deterministic fallback when corner confidence was low.
+  final bool wasRoiCropped;
+
   /// Perspective/corner detection confidence (0.0 to 1.0).
   final double perspectiveConfidence;
 
@@ -78,6 +81,7 @@ class CardNormalizationResult {
     required this.wasResized,
     required this.wasUpscaled,
     required this.wasPerspectiveCorrected,
+    this.wasRoiCropped = false,
     required this.perspectiveConfidence,
     this.temporaryFilePath,
   });
@@ -235,8 +239,9 @@ class CardImageNormalizationService {
       wasUpscaled = true;
     }
 
-    // 7. Card Boundary Detection & Perspective Rectification (Phase 8)
+    // 7. Card Boundary Detection & Perspective Rectification / Safe Crop Fallback
     bool wasPerspectiveCorrected = false;
+    bool wasRoiCropped = false;
     double perspectiveConfidence = 0.0;
 
     if (geometryService != null) {
@@ -246,12 +251,20 @@ class CardImageNormalizationService {
       if (detection.confidence >= geometryService.minConfidenceThreshold &&
           detection.corners != null) {
         final corners = detection.corners!;
+        // Expand corners outward by 3% safety margin to ensure edge address text is never clipped
+        final centroidX = (corners.topLeft.x + corners.topRight.x + corners.bottomLeft.x + corners.bottomRight.x) / 4.0;
+        final centroidY = (corners.topLeft.y + corners.topRight.y + corners.bottomLeft.y + corners.bottomRight.y) / 4.0;
+        const expandFactor = 1.03;
+
+        int expX(int x) => (centroidX + (x - centroidX) * expandFactor).round().clamp(0, working.width - 1);
+        int expY(int y) => (centroidY + (y - centroidY) * expandFactor).round().clamp(0, working.height - 1);
+
         working = img.copyRectify(
           working,
-          topLeft: img.Point(corners.topLeft.x, corners.topLeft.y),
-          topRight: img.Point(corners.topRight.x, corners.topRight.y),
-          bottomLeft: img.Point(corners.bottomLeft.x, corners.bottomLeft.y),
-          bottomRight: img.Point(corners.bottomRight.x, corners.bottomRight.y),
+          topLeft: img.Point(expX(corners.topLeft.x), expY(corners.topLeft.y)),
+          topRight: img.Point(expX(corners.topRight.x), expY(corners.topRight.y)),
+          bottomLeft: img.Point(expX(corners.bottomLeft.x), expY(corners.bottomLeft.y)),
+          bottomRight: img.Point(expX(corners.bottomRight.x), expY(corners.bottomRight.y)),
         );
         wasPerspectiveCorrected = true;
 
@@ -268,9 +281,60 @@ class CardImageNormalizationService {
           );
           wasUpscaled = true;
         }
+      } else if (viewfinderRoi != null && viewfinderRoi.width > 0.1 && viewfinderRoi.height > 0.1) {
+        // Safe ROI crop fallback: When four reliable corners cannot be confidently located,
+        // use the mapped viewfinder ROI with a 5% safe padding to prevent cutting text near card edges
+        final marginX = (working.width * 0.05).round();
+        final marginY = (working.height * 0.05).round();
+        final cropX = max(0, (viewfinderRoi.left * working.width).round() - marginX);
+        final cropY = max(0, (viewfinderRoi.top * working.height).round() - marginY);
+        final cropW = min(working.width - cropX, (viewfinderRoi.width * working.width).round() + 2 * marginX);
+        final cropH = min(working.height - cropY, (viewfinderRoi.height * working.height).round() + 2 * marginY);
+
+        if (cropW > 100 && cropH > 100) {
+          working = img.copyCrop(working, x: cropX, y: cropY, width: cropW, height: cropH);
+          wasRoiCropped = true;
+
+          final rectLong = max(working.width, working.height);
+          if (rectLong < targetUpscaleLongEdge) {
+            final double desiredScale = targetUpscaleLongEdge / rectLong;
+            final double scale = desiredScale.clamp(1.1, maxUpscaleFactor);
+            working = img.copyResize(
+              working,
+              width: (working.width * scale).round(),
+              height: (working.height * scale).round(),
+              interpolation: img.Interpolation.linear,
+            );
+            wasUpscaled = true;
+          }
+        }
       }
-      // If confidence < threshold: DO NOT perform dangerous automatic crops!
-      // Preserve the full normalized upright frame.
+    } else if (viewfinderRoi != null && viewfinderRoi.width > 0.1 && viewfinderRoi.height > 0.1) {
+      // Safe ROI crop fallback when geometryService is not provided but viewfinderRoi is present
+      final marginX = (working.width * 0.05).round();
+      final marginY = (working.height * 0.05).round();
+      final cropX = max(0, (viewfinderRoi.left * working.width).round() - marginX);
+      final cropY = max(0, (viewfinderRoi.top * working.height).round() - marginY);
+      final cropW = min(working.width - cropX, (viewfinderRoi.width * working.width).round() + 2 * marginX);
+      final cropH = min(working.height - cropY, (viewfinderRoi.height * working.height).round() + 2 * marginY);
+
+      if (cropW > 100 && cropH > 100) {
+        working = img.copyCrop(working, x: cropX, y: cropY, width: cropW, height: cropH);
+        wasRoiCropped = true;
+
+        final rectLong = max(working.width, working.height);
+        if (rectLong < targetUpscaleLongEdge) {
+          final double desiredScale = targetUpscaleLongEdge / rectLong;
+          final double scale = desiredScale.clamp(1.1, maxUpscaleFactor);
+          working = img.copyResize(
+            working,
+            width: (working.width * scale).round(),
+            height: (working.height * scale).round(),
+            interpolation: img.Interpolation.linear,
+          );
+          wasUpscaled = true;
+        }
+      }
     }
 
     // 8. Conservative Contrast Optimization (Phase 9)
@@ -302,6 +366,7 @@ class CardImageNormalizationService {
       wasResized: wasResized,
       wasUpscaled: wasUpscaled,
       wasPerspectiveCorrected: wasPerspectiveCorrected,
+      wasRoiCropped: wasRoiCropped,
       perspectiveConfidence: perspectiveConfidence,
       temporaryFilePath: tempFile.path,
     );

@@ -112,6 +112,68 @@ public class ProfileController : ControllerBase
         return Ok(response);
     }
 
+    /// <summary>
+    /// Retrieve the current user's account visibility (Public vs Private).
+    /// </summary>
+    [HttpGet("visibility")]
+    [ProducesResponseType(typeof(AccountVisibilityDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetVisibility()
+    {
+        var userId = GetCurrentUserId();
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        var (success, response, error) = await _profileService.GetVisibilityAsync(userId);
+        if (!success)
+        {
+            return NotFound(new ErrorResponse(error ?? "Profile not found."));
+        }
+
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Update the current user's account visibility (Public vs Private).
+    /// </summary>
+    [HttpPut("visibility")]
+    [ProducesResponseType(typeof(AccountVisibilityDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateVisibility([FromBody] AccountVisibilityDto dto)
+    {
+        var userId = GetCurrentUserId();
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        var (success, response, error) = await _profileService.UpdateVisibilityAsync(userId, dto.IsPublic);
+        if (!success)
+        {
+            return NotFound(new ErrorResponse(error ?? "Profile not found."));
+        }
+
+        return Ok(response);
+    }
+
+    /// <summary>
+    /// Search for discoverable public profiles.
+    /// Strictly filters out Private accounts and only returns public allowlist fields.
+    /// </summary>
+    [HttpGet("search")]
+    [ProducesResponseType(typeof(IEnumerable<PublicProfileSearchResultDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> SearchProfiles([FromQuery] string? q, [FromQuery] int limit = 20)
+    {
+        var results = await _profileService.SearchPublicProfilesAsync(q, limit);
+        return Ok(results);
+    }
+
     private string? GetCurrentUserId()
     {
         return User.FindFirstValue(ClaimTypes.NameIdentifier)

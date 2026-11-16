@@ -173,6 +173,33 @@ class EmailOcrRecovery {
           seenNormalized: seenNormalized,
         );
       }
+
+      // Attempt C: Missing dot before known TLD (e.g. "user@examplecom" -> "user@example.com")
+      if (cleanLine.contains('@') && !cleanLine.contains('.')) {
+        final missingDotMatch = RegExp(
+          r'([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9-]+?)(com|org|net|in|co|io|ai|tech|biz|info|dev|app|edu|gov)\b',
+          caseSensitive: false,
+        ).firstMatch(cleanLine);
+        if (missingDotMatch != null) {
+          final local = missingDotMatch.group(1)!;
+          final sld = missingDotMatch.group(2)!;
+          final tld = missingDotMatch.group(3)!;
+          if (sld.isNotEmpty && sld.length >= 2) {
+            final reconstructed = '$local@$sld.$tld';
+            _validateAndAdd(
+              reconstructed,
+              originalRaw: missingDotMatch.group(0)!,
+              label: label,
+              wasSpaced: false,
+              wasSplit: false,
+              hasCorrection: true,
+              diagnosticNote: 'Reconstructed missing dot before TLD: .$tld',
+              candidates: candidates,
+              seenNormalized: seenNormalized,
+            );
+          }
+        }
+      }
     }
 
     // Step 3: Raw concatenated text fallback for edge cases
@@ -199,7 +226,74 @@ class EmailOcrRecovery {
       }
     }
 
-    return candidates;
+    return suppressEmailFragments(candidates);
+  }
+
+  /// Suppresses truncated, subsumed, or numeric fragment emails.
+  /// E.g. "951@gmail.com" and "1951@gmail.com" when "lnazmul.haque1951@gmail.com" is present.
+  /// "6@gmail.com" when "tanakagawa86@gmail.com" is present.
+  /// "i1973@hotmail.com" when "vardhaman_1973@hotmail.com" is present.
+  static List<EmailCandidate> suppressEmailFragments(List<EmailCandidate> candidates) {
+    if (candidates.length <= 1) return candidates;
+
+    final results = <EmailCandidate>[];
+    for (int i = 0; i < candidates.length; i++) {
+      final cand = candidates[i];
+      final parts = cand.normalized.split('@');
+      if (parts.length != 2) {
+        results.add(cand);
+        continue;
+      }
+      final local = parts[0];
+      final domain = parts[1];
+
+      bool isSubsumed = false;
+      for (int j = 0; j < candidates.length; j++) {
+        if (i == j) continue;
+        final other = candidates[j];
+        final otherParts = other.normalized.split('@');
+        if (otherParts.length != 2) continue;
+        final otherLocal = otherParts[0];
+        final otherDomain = otherParts[1];
+
+        if (domain != otherDomain) continue;
+        if (local == otherLocal) continue;
+
+        // 1. Other local ends with this local (e.g. lnazmul.haque1951 ends with 1951 or 951; tanakagawa86 ends with 6)
+        if (otherLocal.endsWith(local) && otherLocal.length > local.length) {
+          isSubsumed = true;
+          break;
+        }
+
+        // 2. This local is purely numeric and other local contains it
+        if (RegExp(r'^\d+$').hasMatch(local) && otherLocal.contains(local) && otherLocal.length > local.length) {
+          isSubsumed = true;
+          break;
+        }
+
+        // 3. This local stripped of leading single-letter / noise char matches a suffix of other
+        // e.g. "i1973" -> "1973", which is suffix of "vardhaman_1973"
+        final strippedLocal = local.replaceAll(RegExp(r'^[a-zA-Z_.-]'), '');
+        if (strippedLocal.isNotEmpty &&
+            strippedLocal.length >= 3 &&
+            otherLocal.endsWith(strippedLocal) &&
+            otherLocal.length > local.length) {
+          isSubsumed = true;
+          break;
+        }
+
+        // 4. This local is contained within other local, and this local is short (<= 5 chars)
+        if (otherLocal.contains(local) && local.length <= 5 && otherLocal.length > local.length) {
+          isSubsumed = true;
+          break;
+        }
+      }
+
+      if (!isSubsumed) {
+        results.add(cand);
+      }
+    }
+    return results;
   }
 
   /// Reconstructs emails split across adjacent lines.

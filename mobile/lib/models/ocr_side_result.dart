@@ -1,9 +1,11 @@
 import 'dart:ui';
+import 'recovered_ocr_observation.dart';
 
 /// Represents the physical side of a business card.
 enum CardSide {
   front,
   back,
+  both,
 }
 
 /// A 2D point representing coordinates within an OCR image.
@@ -150,6 +152,7 @@ class OcrSideResult {
   final List<OcrLineMetadata> lines;
   final DateTime processedAt;
   final Map<String, dynamic> metadata;
+  final List<RecoveredOcrObservation> recoveredObservations;
 
   OcrSideResult({
     required this.side,
@@ -159,6 +162,7 @@ class OcrSideResult {
     List<OcrLineMetadata> lines = const [],
     DateTime? processedAt,
     this.metadata = const {},
+    this.recoveredObservations = const [],
   })  : lines = lines.isNotEmpty
             ? lines
             : blocks.expand((b) => b.lines).toList(),
@@ -168,6 +172,52 @@ class OcrSideResult {
   bool get isNotEmpty => !isEmpty;
   bool get fallbackInvoked => metadata['fallbackInvoked'] == true;
   String get engineName => (metadata['selectedEngine'] as String?) ?? '';
+
+  OcrSideResult copyWith({
+    CardSide? side,
+    String? imagePath,
+    String? rawText,
+    List<OcrBlockMetadata>? blocks,
+    List<OcrLineMetadata>? lines,
+    DateTime? processedAt,
+    Map<String, dynamic>? metadata,
+    List<RecoveredOcrObservation>? recoveredObservations,
+  }) {
+    return OcrSideResult(
+      side: side ?? this.side,
+      imagePath: imagePath ?? this.imagePath,
+      rawText: rawText ?? this.rawText,
+      blocks: blocks ?? this.blocks,
+      lines: lines ?? this.lines,
+      processedAt: processedAt ?? this.processedAt,
+      metadata: metadata ?? this.metadata,
+      recoveredObservations:
+          recoveredObservations ?? this.recoveredObservations,
+    );
+  }
+
+  /// Serialized OCR observation dictionaries preserving text, coordinates and confidence.
+  List<Map<String, dynamic>> get observations {
+    if (lines.isEmpty) return const [];
+    return lines.asMap().entries.map((entry) {
+      final idx = entry.key;
+      final l = entry.value;
+      return {
+        'id': '${side.name}_$idx',
+        'text': l.text,
+        'confidence': l.confidence ?? 1.0,
+        'side': side.name,
+        'engine': engineName,
+        'lineIndex': l.lineIndex,
+        'boundingBox': {
+          'left': l.boundingBox.left,
+          'top': l.boundingBox.top,
+          'width': l.boundingBox.width,
+          'height': l.boundingBox.height,
+        },
+      };
+    }).toList();
+  }
 
   factory OcrSideResult.empty(CardSide side, {String imagePath = ''}) {
     return OcrSideResult(
@@ -232,6 +282,9 @@ class OcrSideResult {
         'lines': lines.map((l) => l.toJson()).toList(),
         'processedAt': processedAt.toIso8601String(),
         if (metadata.isNotEmpty) 'metadata': metadata,
+        if (recoveredObservations.isNotEmpty)
+          'recoveredObservations':
+              recoveredObservations.map((r) => r.toJson()).toList(),
       };
 }
 

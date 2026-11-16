@@ -49,6 +49,12 @@ public class UserProfile
     [MaxLength(500)]
     public string? ProfilePhotoUrl { get; set; }
 
+    /// <summary>
+    /// Account visibility: true for Public (discoverable via search), false for Private (hidden from public discovery).
+    /// Defaults to false (Private).
+    /// </summary>
+    public bool IsPublic { get; set; } = false;
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;

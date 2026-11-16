@@ -107,4 +107,18 @@ class AuthService {
   Future<bool> refreshToken() async {
     return await _apiClient.refreshTokens();
   }
+
+  /// Permanently deletes the user's account and all associated data,
+  /// requiring password reauthentication. Clears all stored tokens on completion.
+  Future<void> deleteAccount({required String password}) async {
+    try {
+      await _apiClient.post(
+        ApiConfig.deleteAccountEndpoint,
+        body: {'password': password},
+        requiresAuth: true,
+      );
+    } finally {
+      await _storageService.clearAuth();
+    }
+  }
 }

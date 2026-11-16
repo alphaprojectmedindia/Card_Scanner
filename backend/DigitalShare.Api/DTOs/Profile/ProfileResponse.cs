@@ -14,6 +14,7 @@ public class ProfileResponse
     public string? Address { get; set; }
     public string? Bio { get; set; }
     public string? ProfilePhotoUrl { get; set; }
+    public bool IsPublic { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
 }

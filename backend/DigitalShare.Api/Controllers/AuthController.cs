@@ -130,4 +130,36 @@ public class AuthController : ControllerBase
         await _authService.RevokeAllUserRefreshTokensAsync(userId);
         return Ok(new { message = "All active sessions revoked successfully." });
     }
+
+    /// <summary>
+    /// Permanently delete the authenticated user's account and all associated personal data.
+    /// Strictly requires password reauthentication.
+    /// </summary>
+    [HttpPost("delete-account")]
+    [HttpDelete("account")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> DeleteAccount([FromBody] DeleteAccountRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        var (success, error) = await _authService.DeleteAccountAsync(userId, request.Password);
+        if (!success)
+        {
+            return BadRequest(new ErrorResponse(error ?? "Account deletion failed."));
+        }
+
+        return Ok(new { message = "Account and all associated personal data have been permanently deleted." });
+    }
 }

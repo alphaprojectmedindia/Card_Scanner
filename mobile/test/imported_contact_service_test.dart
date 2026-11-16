@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:digital_share/services/api_client.dart';
 import 'package:digital_share/services/imported_contact_service.dart';
 import 'package:digital_share/services/secure_storage_service.dart';
+import 'package:digital_share/services/storage/local_contact_repository.dart';
 
 class FakeSecureStorageService extends SecureStorageService {
   @override
@@ -13,6 +15,20 @@ class FakeSecureStorageService extends SecureStorageService {
 
 void main() {
   group('ImportedContactService Unit Tests', () {
+    late Directory tempDir;
+    late LocalContactRepository tempRepo;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('imported_contact_test_');
+      tempRepo = LocalContactRepository(storageDirectory: tempDir);
+    });
+
+    tearDown(() {
+      try {
+        tempDir.deleteSync(recursive: true);
+      } catch (_) {}
+    });
+
     test('checkDuplicate calls endpoint and returns parsed result', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, contains('/api/imported-contacts/check-duplicate'));
@@ -45,7 +61,10 @@ void main() {
         httpClient: mockClient,
         storageService: FakeSecureStorageService(),
       );
-      final service = ImportedContactService(apiClient: apiClient);
+      final service = ImportedContactService(
+        apiClient: apiClient,
+        localRepo: tempRepo,
+      );
 
       final result = await service.checkDuplicate(
         phoneNumbers: ['9876543210'],
@@ -88,7 +107,10 @@ void main() {
         httpClient: mockClient,
         storageService: FakeSecureStorageService(),
       );
-      final service = ImportedContactService(apiClient: apiClient);
+      final service = ImportedContactService(
+        apiClient: apiClient,
+        localRepo: tempRepo,
+      );
 
       final saved = await service.saveContact({
         'fullName': 'Rahul Kumar',
@@ -132,13 +154,15 @@ void main() {
         httpClient: mockClient,
         storageService: FakeSecureStorageService(),
       );
-      final service = ImportedContactService(apiClient: apiClient);
+      final service = ImportedContactService(
+        apiClient: apiClient,
+        localRepo: tempRepo,
+      );
 
       final contacts = await service.getContacts();
 
       expect(contacts.length, 2);
-      expect(contacts[0].fullName, 'Rahul Kumar');
-      expect(contacts[1].fullName, 'Priya Sharma');
+      expect(contacts.map((c) => c.fullName), containsAll(['Rahul Kumar', 'Priya Sharma']));
     });
 
     test('updateContact puts payload and returns updated contact', () async {
@@ -166,7 +190,10 @@ void main() {
         httpClient: mockClient,
         storageService: FakeSecureStorageService(),
       );
-      final service = ImportedContactService(apiClient: apiClient);
+      final service = ImportedContactService(
+        apiClient: apiClient,
+        localRepo: tempRepo,
+      );
 
       final updated = await service.updateContact('card-1', {'fullName': 'Rahul Updated'});
       expect(updated.fullName, 'Rahul Updated');
@@ -186,7 +213,10 @@ void main() {
         httpClient: mockClient,
         storageService: FakeSecureStorageService(),
       );
-      final service = ImportedContactService(apiClient: apiClient);
+      final service = ImportedContactService(
+        apiClient: apiClient,
+        localRepo: tempRepo,
+      );
 
       await service.deleteContact('card-1');
       expect(deleteCalled, isTrue);

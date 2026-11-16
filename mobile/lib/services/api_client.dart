@@ -57,7 +57,7 @@ class ApiClient {
     return headers;
   }
 
-  static const Duration defaultTimeout = Duration(seconds: 25);
+  static const Duration defaultTimeout = Duration(seconds: 15);
 
   /// Single-flight refresh coordinator:
   /// Ensures multiple concurrent 401 requests trigger only ONE refresh operation.
@@ -162,9 +162,10 @@ class ApiClient {
     required Future<http.Response> Function(Map<String, String> headers)
         sendRequest,
     bool requiresAuth = true,
+    Duration? timeout,
   }) async {
     final headers = await _buildHeaders(requiresAuth: requiresAuth);
-    final response = await _sendWithTimeout(sendRequest(headers));
+    final response = await _sendWithTimeout(sendRequest(headers), timeout: timeout);
 
     // When access token expires on an authenticated request:
     // (Ensure refresh endpoint itself never triggers automatic refresh)
@@ -178,7 +179,7 @@ class ApiClient {
         // Retry original request ONCE. If retry returns 401 again, _processResponse throws
         // UnauthorizedException without looping.
         final retryResponse =
-            await _sendWithTimeout(sendRequest(retriedHeaders));
+            await _sendWithTimeout(sendRequest(retriedHeaders), timeout: timeout);
         return _processResponse(retryResponse);
       } else {
         return _processResponse(response);
@@ -209,20 +210,23 @@ class ApiClient {
     }
   }
 
-  Future<dynamic> get(String url, {bool requiresAuth = true}) async {
+  Future<dynamic> get(String url,
+      {bool requiresAuth = true, Duration? timeout}) async {
     return _executeWithAuthRetry(
       url: url,
       requiresAuth: requiresAuth,
+      timeout: timeout,
       sendRequest: (headers) =>
           _httpClient.get(Uri.parse(url), headers: headers),
     );
   }
 
   Future<dynamic> post(String url,
-      {dynamic body, bool requiresAuth = false}) async {
+      {dynamic body, bool requiresAuth = false, Duration? timeout}) async {
     return _executeWithAuthRetry(
       url: url,
       requiresAuth: requiresAuth,
+      timeout: timeout,
       sendRequest: (headers) => _httpClient.post(
         Uri.parse(url),
         headers: headers,
@@ -232,10 +236,11 @@ class ApiClient {
   }
 
   Future<dynamic> put(String url,
-      {dynamic body, bool requiresAuth = true}) async {
+      {dynamic body, bool requiresAuth = true, Duration? timeout}) async {
     return _executeWithAuthRetry(
       url: url,
       requiresAuth: requiresAuth,
+      timeout: timeout,
       sendRequest: (headers) => _httpClient.put(
         Uri.parse(url),
         headers: headers,
@@ -244,10 +249,12 @@ class ApiClient {
     );
   }
 
-  Future<dynamic> delete(String url, {bool requiresAuth = true}) async {
+  Future<dynamic> delete(String url,
+      {bool requiresAuth = true, Duration? timeout}) async {
     return _executeWithAuthRetry(
       url: url,
       requiresAuth: requiresAuth,
+      timeout: timeout,
       sendRequest: (headers) =>
           _httpClient.delete(Uri.parse(url), headers: headers),
     );
@@ -260,10 +267,15 @@ class ApiClient {
     List<int>? fileBytes,
     String? filename,
     String? contentType,
+    Map<String, String>? fields,
     bool requiresAuth = true,
   }) async {
     Future<http.Response> sendMultipart(String? token) async {
       final request = http.MultipartRequest('POST', Uri.parse(url));
+
+      if (fields != null && fields.isNotEmpty) {
+        request.fields.addAll(fields);
+      }
 
       if (requiresAuth && token != null && token.isNotEmpty) {
         request.headers['Authorization'] = 'Bearer $token';

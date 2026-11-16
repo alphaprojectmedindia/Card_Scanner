@@ -64,6 +64,10 @@ public class ProfileService : IProfileService
         profile.Address = request.Address?.Trim();
         profile.Bio = request.Bio?.Trim();
         profile.ProfilePhotoUrl = request.ProfilePhotoUrl?.Trim();
+        if (request.IsPublic.HasValue)
+        {
+            profile.IsPublic = request.IsPublic.Value;
+        }
         profile.UpdatedAtUtc = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync();
@@ -119,6 +123,71 @@ public class ProfileService : IProfileService
         return (true, MapToResponse(profile), null, StatusCodes.Status200OK);
     }
 
+    public async Task<(bool Success, AccountVisibilityDto? Response, string? Error)> GetVisibilityAsync(string userId)
+    {
+        var profile = await _dbContext.UserProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == userId);
+
+        if (profile == null)
+        {
+            return (false, null, "Profile not found.");
+        }
+
+        return (true, new AccountVisibilityDto { IsPublic = profile.IsPublic }, null);
+    }
+
+    public async Task<(bool Success, AccountVisibilityDto? Response, string? Error)> UpdateVisibilityAsync(string userId, bool isPublic)
+    {
+        var profile = await _dbContext.UserProfiles
+            .FirstOrDefaultAsync(p => p.UserId == userId);
+
+        if (profile == null)
+        {
+            return (false, null, "Profile not found.");
+        }
+
+        profile.IsPublic = isPublic;
+        profile.UpdatedAtUtc = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Account visibility updated to {IsPublic} for user {UserId}", isPublic, userId);
+
+        return (true, new AccountVisibilityDto { IsPublic = profile.IsPublic }, null);
+    }
+
+    public async Task<IEnumerable<PublicProfileSearchResultDto>> SearchPublicProfilesAsync(string? query, int limit = 20)
+    {
+        var queryable = _dbContext.UserProfiles
+            .AsNoTracking()
+            .Where(p => p.IsPublic); // STRICT PRIVACY RULE: Only public accounts appear in search/discovery!
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var trimmed = query.Trim().ToLower();
+            queryable = queryable.Where(p =>
+                (p.FullName != null && p.FullName.ToLower().Contains(trimmed)) ||
+                (p.Company != null && p.Company.ToLower().Contains(trimmed)) ||
+                (p.JobTitle != null && p.JobTitle.ToLower().Contains(trimmed)));
+        }
+
+        var results = await queryable
+            .OrderBy(p => p.FullName ?? p.Company ?? p.ShareId)
+            .Take(Math.Clamp(limit, 1, 50))
+            .Select(p => new PublicProfileSearchResultDto
+            {
+                ShareId = p.ShareId,
+                FullName = p.FullName,
+                Company = p.Company,
+                JobTitle = p.JobTitle,
+                ProfilePhotoUrl = p.ProfilePhotoUrl
+            })
+            .ToListAsync();
+
+        return results;
+    }
+
     private static ProfileResponse MapToResponse(UserProfile profile)
     {
         return new ProfileResponse
@@ -135,6 +204,7 @@ public class ProfileService : IProfileService
             Address = profile.Address,
             Bio = profile.Bio,
             ProfilePhotoUrl = profile.ProfilePhotoUrl,
+            IsPublic = profile.IsPublic,
             CreatedAtUtc = profile.CreatedAtUtc,
             UpdatedAtUtc = profile.UpdatedAtUtc
         };

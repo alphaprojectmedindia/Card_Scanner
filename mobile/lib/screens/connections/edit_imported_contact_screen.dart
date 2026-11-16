@@ -107,6 +107,8 @@ class _EditImportedContactScreenState extends State<EditImportedContactScreen> {
         'jobTitle': jobTitle.isEmpty ? null : jobTitle,
         'website': website.isEmpty ? null : website,
         'address': address.isEmpty ? null : address,
+        if (widget.contact.personalRemark != null)
+          'personalRemark': widget.contact.personalRemark,
         'phoneNumbers': validPhones
             .map((p) => {
                   'number': p.number.trim(),

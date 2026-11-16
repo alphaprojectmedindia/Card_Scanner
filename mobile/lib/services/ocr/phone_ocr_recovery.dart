@@ -87,7 +87,7 @@ class PhoneOcrRecovery {
 
   // Common tax and legal registration numbers that must NOT be extracted as phone numbers
   static final RegExp _nonPhoneIdentifiersRegExp = RegExp(
-    r'\b(?:gstin|gst|cin|reg\s*no|reg\.|registration|invoice|estd|tin|pan|date)\b',
+    r'\b(?:gstin|gst|cin|reg\s*no|reg\.|registration|invoice|estd|tin|pan|date|iso(?:\s*[:\-\d]|\b)|iso\s*\d+(?::\d+)?|cert(?:ified|ification)?|ce\s*\d+|gmp|nabh|nabl|halal|kosher|fda|isi|bis)\b',
     caseSensitive: false,
   );
 
@@ -95,6 +95,11 @@ class PhoneOcrRecovery {
   static final RegExp _datePatternRegExp = RegExp(
     r'^(?:date\s*[:\-\.]?\s*)?(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})$',
     caseSensitive: false,
+  );
+
+  // Tenure year range patterns (e.g. 2025-2027, 2024 - 2026, 2023/2025)
+  static final RegExp _yearRangeRegExp = RegExp(
+    r'\b(?:19|20)\d{2}\s*[-–/]\s*(?:(?:19|20)\d{2}|\d{2})\b',
   );
 
   /// Inspects OCR lines and recovers all valid phone candidates.
@@ -112,10 +117,38 @@ class PhoneOcrRecovery {
       if (_isNonPhoneLine(line)) continue;
 
       // Check for split segments within line (e.g. "Tel: 2345 6789 / Mob: 98765 43210")
-      final segments = line.split(RegExp(r'\s*[\|\/,;]\s*'));
+      String? activeStdCode;
+      final segments = line.split(RegExp(r'\s*(?:[\|\/,;]|&|\band\b)\s*'));
       for (final segment in segments) {
-        final cand = _evaluateSingleSegment(segment, sourceEngine: sourceEngine);
-        if (cand != null) {
+        final cands = _evaluateSegmentCandidates(
+          segment,
+          sourceEngine: sourceEngine,
+          previousStdCode: activeStdCode,
+        );
+        for (final cand in cands) {
+          final std = extractStdCode(cand.formatted);
+          if (std != null) activeStdCode = std;
+
+          // Check if candidate is equivalent to an existing candidate
+          int existingIndex = -1;
+          for (int cIdx = 0; cIdx < candidates.length; cIdx++) {
+            if (areEquivalentPhones(cand.normalized, candidates[cIdx].normalized)) {
+              existingIndex = cIdx;
+              break;
+            }
+          }
+
+          if (existingIndex != -1) {
+            final existingDigits = candidates[existingIndex].normalized.replaceAll(_digitsOnlyRegExp, '');
+            final candDigits = cand.normalized.replaceAll(_digitsOnlyRegExp, '');
+            if (candDigits.length > existingDigits.length) {
+              seenNormalized.remove(candidates[existingIndex].normalized);
+              candidates[existingIndex] = cand;
+              seenNormalized.add(cand.normalized);
+            }
+            continue;
+          }
+
           if (_isDuplicate(cand.normalized, seenNormalized)) {
             if (kDebugMode) {
               debugPrint('[$sourceEngine] Duplicate phone discarded: ${cand.formatted}');
@@ -126,6 +159,8 @@ class PhoneOcrRecovery {
           candidates.add(cand);
         }
       }
+
+
     }
 
     // 2. Second Pass: Split-line reconstruction
@@ -197,10 +232,85 @@ class PhoneOcrRecovery {
     return false;
   }
 
+  /// Extracts the Indian STD area code (e.g. 0422, 044, 080) from a formatted phone string.
+  static String? extractStdCode(String phone) {
+    final clean = phone.trim();
+    final sepMatch = RegExp(r'^\(?0([1-9]\d{1,3})\)?[\s\-\.]').firstMatch(clean);
+    if (sepMatch != null) {
+      return '0${sepMatch.group(1)}';
+    }
+    final digits = clean.replaceAll(_digitsOnlyRegExp, '');
+    if (digits.startsWith('0') && digits.length >= 9 && digits.length <= 12) {
+      if (digits.length == 11) {
+        return digits.substring(0, 4);
+      } else if (digits.length == 10) {
+        return digits.substring(0, 3);
+      }
+    }
+    return null;
+  }
+
+  /// Evaluates a segment which may contain one or multiple phone candidates.
+  static List<RecoveredPhoneCandidate> _evaluateSegmentCandidates(
+    String segment, {
+    required String sourceEngine,
+    String? previousStdCode,
+  }) {
+    final results = <RecoveredPhoneCandidate>[];
+    final trimmed = segment.trim();
+    if (trimmed.isEmpty || _isNonPhoneLine(trimmed)) return results;
+
+    // 1. Try single segment evaluation
+    final single = _evaluateSingleSegment(
+      trimmed,
+      sourceEngine: sourceEngine,
+      previousStdCode: previousStdCode,
+    );
+    if (single != null) {
+      results.add(single);
+      String remaining = '';
+      if (trimmed.contains(single.formatted)) {
+        remaining = trimmed.replaceFirst(single.formatted, '').trim();
+      } else if (trimmed.contains(single.raw)) {
+        remaining = trimmed.replaceFirst(single.raw, '').trim();
+      }
+      if (remaining.isNotEmpty && remaining != trimmed && remaining.length >= 6 && !_isNonPhoneLine(remaining)) {
+        final nextStd = extractStdCode(single.formatted) ?? previousStdCode;
+        final sub = _evaluateSegmentCandidates(
+          remaining,
+          sourceEngine: sourceEngine,
+          previousStdCode: nextStd,
+        );
+        results.addAll(sub);
+      }
+      return results;
+    }
+
+    // 2. Try whitespace/comma sub-splitting if segment has multiple number candidates
+    final spaceParts = trimmed.split(RegExp(r'\s{2,}|\s*,\s*|\s*;\s*'));
+    if (spaceParts.length > 1) {
+      String? currentStd = previousStdCode;
+      for (final part in spaceParts) {
+        final cands = _evaluateSegmentCandidates(
+          part,
+          sourceEngine: sourceEngine,
+          previousStdCode: currentStd,
+        );
+        for (final c in cands) {
+          results.add(c);
+          currentStd = extractStdCode(c.formatted) ?? currentStd;
+        }
+      }
+    }
+
+    return results;
+  }
+
   /// Evaluates a single candidate segment.
   static RecoveredPhoneCandidate? _evaluateSingleSegment(
     String segment, {
     required String sourceEngine,
+    String? previousStdCode,
   }) {
     final trimmed = segment.trim();
     if (trimmed.isEmpty) return null;
@@ -213,6 +323,7 @@ class PhoneOcrRecovery {
       trimmed,
       label: label,
       sourceEngine: sourceEngine,
+      previousStdCode: previousStdCode,
     );
     if (direct != null) {
       return direct;
@@ -230,6 +341,7 @@ class PhoneOcrRecovery {
           sourceEngine: sourceEngine,
           hadCorrection: true,
           correctionsApplied: correctionsApplied,
+          previousStdCode: previousStdCode,
         );
         if (correctedCandidate != null) {
           if (kDebugMode) {
@@ -252,6 +364,7 @@ class PhoneOcrRecovery {
     required String sourceEngine,
     bool hadCorrection = false,
     List<String> correctionsApplied = const [],
+    String? previousStdCode,
   }) {
     final clean = text.trim();
 
@@ -262,6 +375,11 @@ class PhoneOcrRecovery {
 
     // Guard: Dates (e.g. 2024-10-15 or 15/10/2024) must never be extracted as phones
     if (RegExp(r'^(?:date\s*[:\-\.]?\s*)?(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4})$', caseSensitive: false).hasMatch(clean)) {
+      return null;
+    }
+
+    // Guard: Tenure year ranges (e.g. 2025-2027) must never be extracted as phones unless explicitly labeled
+    if (label == null && _yearRangeRegExp.hasMatch(clean)) {
       return null;
     }
 
@@ -313,27 +431,97 @@ class PhoneOcrRecovery {
       }
     }
 
-    // 3. Indian standard 10-digit mobile number: e.g. 98765 43210, 98765-43210, 9876543210
+    // 3. Indian Mobile Number (all variations: +91, 91, leading 0, 5+5, 4+6, 3+3+4, continuous 10-digit)
     final indianMobilePattern = RegExp(
-      r'\b([6-9]\d{4}[\s\-\.]?\d{5})\b|\b([6-9]\d{9})\b',
+      r'(?:(?:\+91|91|0)[\s\-\.]?)?\b([6-9]\d{4}[\s\-\.]?\d{5}|[6-9]\d{3}[\s\-\.]?\d{6}|[6-9]\d{2}[\s\-\.]?\d{3}[\s\-\.]?\d{4}|[6-9]\d{9})\b',
     );
     final indianMatch = indianMobilePattern.firstMatch(clean);
     if (indianMatch != null) {
-      final numStr = (indianMatch.group(1) ?? indianMatch.group(2))!.trim();
-      final digits = numStr.replaceAll(_digitsOnlyRegExp, '');
-      if (digits.length == 10) {
+      final formatted = indianMatch.group(0)!.trim();
+      final subDigits = indianMatch.group(1)!.replaceAll(_digitsOnlyRegExp, '');
+      if (subDigits.length == 10 && RegExp(r'^[6-9]').hasMatch(subDigits)) {
+        final assignedLabel = label ?? (detectPhoneLabel(clean) ?? 'Mobile');
         return RecoveredPhoneCandidate(
           raw: clean,
-          formatted: numStr,
-          normalized: normalizePhoneNumber(numStr),
-          label: label ?? 'Mobile',
+          formatted: formatted,
+          normalized: normalizePhoneNumber(formatted),
+          label: assignedLabel,
           confidence: hadCorrection ? 0.88 : 0.96,
           sourceEngine: sourceEngine,
           hasCharacterCorrection: hadCorrection,
           diagnosticNote: hadCorrection
-              ? '10-digit mobile with corrections: ${correctionsApplied.join(", ")}'
-              : 'Standard 10-digit mobile format',
+              ? 'Indian mobile with corrections: '
+              : 'Indian mobile format ($assignedLabel)',
         );
+      }
+    }
+    // 3b. Indian Landline with STD area code: e.g. 0422-3508080, 044-28281234, (0422) 3508080, 080 23456789
+    final indianLandlinePattern = RegExp(
+      r'(?:\b|\()(0[1-9]\d{1,3})\)?[-\s.]?(\d{6,8})\b|(?:\b|\()(0[1-9]\d{1,3})\)?[-\s.]?(\d{3,4})[-\s.]?(\d{3,4})\b',
+    );
+    final landlineMatch = indianLandlinePattern.firstMatch(clean);
+    if (landlineMatch != null) {
+      final stdCode = landlineMatch.group(1) ?? landlineMatch.group(3)!;
+      final formatted = landlineMatch.group(0)!.trim();
+      final digits = formatted.replaceAll(_digitsOnlyRegExp, '');
+      if (digits.length >= 8 && digits.length <= 13) {
+        return RecoveredPhoneCandidate(
+          raw: clean,
+          formatted: formatted,
+          normalized: normalizePhoneNumber(formatted),
+          label: label ?? 'Phone',
+          confidence: hadCorrection ? 0.88 : 0.96,
+          sourceEngine: sourceEngine,
+          hasCharacterCorrection: hadCorrection,
+          diagnosticNote: hadCorrection
+              ? 'Indian STD landline with corrections: ${correctionsApplied.join(", ")}'
+              : 'Indian STD landline format ($stdCode)',
+        );
+      }
+    }
+
+    // 3c. Bangladesh Mobile Number: e.g. +88 01713 032845, +8801713032845, +880 1713-032845, 01713 032845
+    final bangladeshMobilePattern = RegExp(
+      r'(?:(?:\+?880?|880)[\s\-\.]?)?\b(0?1[3-9]\d{2}[\s\-\.]?\d{6}|0?1[3-9]\d{8})\b',
+    );
+    final bangladeshMatch = bangladeshMobilePattern.firstMatch(clean);
+    if (bangladeshMatch != null) {
+      final formatted = bangladeshMatch.group(0)!.trim();
+      final subDigits = bangladeshMatch.group(1)!.replaceAll(_digitsOnlyRegExp, '');
+      if (subDigits.length >= 10 && subDigits.length <= 11) {
+        final assignedLabel = label ?? (detectPhoneLabel(clean) ?? 'Mobile');
+        return RecoveredPhoneCandidate(
+          raw: clean,
+          formatted: formatted,
+          normalized: normalizePhoneNumber(formatted),
+          label: assignedLabel,
+          confidence: hadCorrection ? 0.88 : 0.96,
+          sourceEngine: sourceEngine,
+          hasCharacterCorrection: hadCorrection,
+          diagnosticNote: hadCorrection
+              ? 'Bangladesh mobile with corrections: ${correctionsApplied.join(", ")}'
+              : 'Bangladesh mobile format ($assignedLabel)',
+        );
+      }
+    }
+
+    // 3c. Inherited STD area code for secondary telephone number: e.g. "0422-3508080, 3508051"
+    if (previousStdCode != null) {
+      final subMatch = RegExp(r'^\b(\d{3,4}[-\s.]?\d{3,4}|\d{6,8})\b$').firstMatch(clean);
+      if (subMatch != null) {
+        final subDigits = subMatch.group(1)!.replaceAll(_digitsOnlyRegExp, '');
+        if (subDigits.length >= 6 && subDigits.length <= 8) {
+          final formatted = '$previousStdCode-$subDigits';
+          return RecoveredPhoneCandidate(
+            raw: clean,
+            formatted: formatted,
+            normalized: normalizePhoneNumber(formatted),
+            label: label ?? 'Phone',
+            confidence: 0.92,
+            sourceEngine: sourceEngine,
+            diagnosticNote: 'Inherited STD code ($previousStdCode)',
+          );
+        }
       }
     }
 
@@ -392,6 +580,9 @@ class PhoneOcrRecovery {
     final genericMatch = genericHyphenPattern.firstMatch(clean);
     if (genericMatch != null) {
       final numStr = (genericMatch.group(1) ?? genericMatch.group(2))!.trim();
+      if (_yearRangeRegExp.hasMatch(numStr) || _yearRangeRegExp.hasMatch(clean)) {
+        return null;
+      }
       final digits = numStr.replaceAll(_digitsOnlyRegExp, '');
       if (digits.length >= 7 && digits.length <= 14) {
         return RecoveredPhoneCandidate(
@@ -711,6 +902,13 @@ class PhoneOcrRecovery {
       return true;
     }
 
+    // Landline / national subscriber suffix matching (e.g. 044-24342596 vs 24342596 or +91-44-42107657 vs 42107657)
+    if (digitsA.length >= 6 && digitsB.length >= 6) {
+      if (digitsA.endsWith(digitsB) || digitsB.endsWith(digitsA)) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -747,6 +945,9 @@ class PhoneOcrRecovery {
         upper.contains('POSTAL CODE') ||
         upper.contains('ZIP:') ||
         upper.contains('ZIP CODE') ||
+        upper.contains('ISO') ||
+        upper.contains('CERTIFIED') ||
+        upper.contains('CERTIFICATION') ||
         _nonPhoneIdentifiersRegExp.hasMatch(upper)) {
       return true;
     }
@@ -759,6 +960,11 @@ class PhoneOcrRecovery {
 
     // Standard date formats
     if (_datePatternRegExp.hasMatch(line)) {
+      return true;
+    }
+
+    // Tenure year range patterns without explicit phone label
+    if (_yearRangeRegExp.hasMatch(line) && detectPhoneLabel(line) == null) {
       return true;
     }
 

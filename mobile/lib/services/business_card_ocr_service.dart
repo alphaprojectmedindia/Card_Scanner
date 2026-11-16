@@ -17,6 +17,7 @@ abstract class IBusinessCardOcrService {
     required String imagePath,
     required CardSide side,
     String? source,
+    ViewfinderNormalizedRect? viewfinderRoi,
   }) async {
     final text = await recognizeTextFromPath(imagePath);
     return OcrSideResult.fromText(
@@ -62,6 +63,7 @@ class BusinessCardOcrService implements IBusinessCardOcrService {
     required String imagePath,
     required CardSide side,
     String? source,
+    ViewfinderNormalizedRect? viewfinderRoi,
   }) async {
     // In unit test environments with mock pipelines using fictitious paths (e.g. '/test/front.jpg'),
     // delegate directly to the mock pipeline if the file does not exist on disk.
@@ -82,11 +84,12 @@ class BusinessCardOcrService implements IBusinessCardOcrService {
     final tempFilesToClean = <String>[];
 
     try {
-      // 1. Unified Card Image Normalization (EXIF, format, resolution, perspective, contrast)
+      // 1. Unified Card Image Normalization (EXIF, format, resolution, perspective, contrast, ROI crop)
       final normResult = await normalizationService.normalizeCardImage(
         imagePath: imagePath,
         side: side,
         geometryService: geometryService,
+        viewfinderRoi: viewfinderRoi,
       );
       final workingPath = normResult.normalizedPath;
       if (normResult.temporaryFilePath != null) {
