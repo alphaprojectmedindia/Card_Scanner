@@ -101,6 +101,14 @@ public class GeminiRequestSerializationTests
     // =========================================================================
 
     [Fact]
+    public void ReproduceOriginalException_JsonSerializerOptionsWithoutResolver_MakeReadOnlyThrows()
+    {
+        var optionsWithoutResolver = new JsonSerializerOptions { WriteIndented = false };
+        var ex = Assert.Throws<InvalidOperationException>(() => optionsWithoutResolver.MakeReadOnly());
+        Assert.Contains("TypeInfoResolver", ex.Message);
+    }
+
+    [Fact]
     public async Task BuildGeminiRestPayload_Serializes_ResponseFormat_With_ApplicationJson_And_Schema()
     {
         var service = CreateService(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"));
@@ -517,6 +525,133 @@ public class GeminiRequestSerializationTests
         Assert.False(response.FrontImageVerified);
         Assert.NotNull(response.ImageVerificationFailureReason);
         Assert.Contains("could not be retrieved", response.ImageVerificationFailureReason);
+    }
+
+    // =========================================================================
+    // REGRESSION TEST SUITE: .NET 8 JSON SERIALIZATION FIX & VERIFICATION
+    // =========================================================================
+
+    [Fact]
+    public async Task Regression_SerializeCompleteGeminiPayload_WithConfiguredResolver_Succeeds()
+    {
+        var service = CreateService(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"));
+        var request = CreateSampleRequest();
+        request.AnalysisMode = "MultimodalVision";
+        request.FrontImageStorageKey = "scans/front_card.jpg";
+        request.BackImageStorageKey = "scans/back_card.jpg";
+
+        // Must succeed without throwing System.InvalidOperationException
+        var (payload, frontRetrieved, backRetrieved, failure) =
+            await service.BuildGeminiRestPayloadWithImageStatusAsync(request);
+
+        Assert.NotNull(payload);
+        Assert.NotEmpty(payload);
+        Assert.True(frontRetrieved);
+        Assert.True(backRetrieved);
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public async Task Regression_SerializeCompleteGeminiPayload_RetainsImageDataAndBase64Encoding()
+    {
+        var service = CreateService(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"));
+        var request = CreateSampleRequest();
+        request.AnalysisMode = "MultimodalVision";
+        request.FrontImageStorageKey = "scans/front_card.jpg";
+        request.BackImageStorageKey = "scans/back_card.jpg";
+
+        var (payload, _, _, _) = await service.BuildGeminiRestPayloadWithImageStatusAsync(request);
+
+        var json = JsonNode.Parse(payload)!.AsObject();
+        var parts = json["contents"]![0]!["parts"]!.AsArray();
+
+        // Expected base64 of "fake_image_bytes" set up in CreateService mock
+        var expectedBase64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("fake_image_bytes"));
+
+        var inlineParts = parts.Where(p => p?["inlineData"] != null).ToList();
+        Assert.Equal(2, inlineParts.Count);
+
+        foreach (var inlinePart in inlineParts)
+        {
+            var data = inlinePart!["inlineData"]!["data"]!.GetValue<string>();
+            Assert.Equal(expectedBase64, data);
+        }
+    }
+
+    [Fact]
+    public async Task Regression_SerializeCompleteGeminiPayload_RetainsMimeTypes()
+    {
+        var service = CreateService(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"));
+        var request = CreateSampleRequest();
+        request.AnalysisMode = "MultimodalVision";
+        request.FrontImageStorageKey = "scans/front_card.jpg";
+
+        var (payload, _, _, _) = await service.BuildGeminiRestPayloadWithImageStatusAsync(request);
+
+        var json = JsonNode.Parse(payload)!.AsObject();
+
+        // 1. Verify image inlineData mimeType is image/jpeg
+        var parts = json["contents"]![0]!["parts"]!.AsArray();
+        var inlineData = parts.First(p => p?["inlineData"] != null)!["inlineData"]!.AsObject();
+        Assert.Equal("image/jpeg", inlineData["mimeType"]!.GetValue<string>());
+
+        // 2. Verify generationConfig responseFormat mimeType is APPLICATION_JSON
+        var responseFormatText = json["generationConfig"]!["responseFormat"]!["text"]!.AsObject();
+        Assert.Equal("APPLICATION_JSON", responseFormatText["mimeType"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Regression_SerializeCompleteGeminiPayload_CanBeParsedBackToJsonNode()
+    {
+        var service = CreateService(new MockHttpMessageHandler(HttpStatusCode.OK, "{}"));
+        var request = CreateSampleRequest();
+        request.AnalysisMode = "MultimodalVision";
+        request.FrontImageStorageKey = "scans/front_card.jpg";
+        request.BackImageStorageKey = "scans/back_card.jpg";
+
+        var (payload, _, _, _) = await service.BuildGeminiRestPayloadWithImageStatusAsync(request);
+
+        // Parsing back must succeed with standard JsonNode and JsonDocument
+        var parsedNode = JsonNode.Parse(payload);
+        Assert.NotNull(parsedNode);
+
+        using var parsedDoc = JsonDocument.Parse(payload);
+
+        // Verify root structure is preserved exactly
+        Assert.Equal(JsonValueKind.Object, parsedDoc.RootElement.ValueKind);
+        Assert.True(parsedDoc.RootElement.TryGetProperty("contents", out var contentsProp));
+        Assert.True(parsedDoc.RootElement.TryGetProperty("generationConfig", out var genConfigProp));
+        Assert.Equal(JsonValueKind.Array, contentsProp.ValueKind);
+        Assert.Equal(JsonValueKind.Object, genConfigProp.ValueKind);
+    }
+
+    [Fact]
+    public async Task Regression_ExecuteGeminiCall_WhenGeminiReturnsHttpError_FallsBackToLocalBaselineGracefully()
+    {
+        // Mock Gemini returning 500 Internal Server Error
+        var service = CreateService(new MockHttpMessageHandler(HttpStatusCode.InternalServerError, "{\"error\":{\"code\":500,\"message\":\"Backend Error\"}}"));
+        var request = CreateSampleRequest();
+        request.LocalBaseline = new LocalParserBaselineDto
+        {
+            FullName = "Jane Smith",
+            Company = "Apex Healthcare",
+            JobTitle = "Chief Medical Officer",
+            PhoneNumbers = new List<string> { "+1 555 987 6543" }
+        };
+
+        var response = await service.AnalyzeCardAsync("user_fallback_test", request, CancellationToken.None);
+
+        Assert.NotNull(response);
+        Assert.False(response.GeminiApiExecuted);
+        Assert.True(response.FallbackToLocalBaseline);
+        Assert.StartsWith("FallbackError", response.GeminiExecutionStatus);
+
+        // Verify local baseline fields were preserved and restored into response
+        Assert.Equal("Jane Smith", response.FullName?.Value);
+        Assert.Equal("Apex Healthcare", response.Company?.Value);
+        Assert.Equal("Chief Medical Officer", response.JobTitle?.Value);
+        Assert.Single(response.PhoneNumbers);
+        Assert.Equal("+1 555 987 6543", response.PhoneNumbers[0].Number);
     }
 }
 

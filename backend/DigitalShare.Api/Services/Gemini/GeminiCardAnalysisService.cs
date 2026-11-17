@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 using DigitalShare.Api.Configuration;
 using DigitalShare.Api.DTOs.CardAnalysis;
 using DigitalShare.Api.Models;
@@ -19,7 +20,18 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
     private readonly CardAnalysisSemanticValidator _validator;
     private readonly CardAnalysisIdempotencyManager _idempotencyManager;
     private readonly ILogger<GeminiCardAnalysisService> _logger;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    private static readonly JsonSerializerOptions PayloadSerializerOptions = new()
+    {
+        WriteIndented = false,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+    };
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+    };
 
     public GeminiCardAnalysisService(
         HttpClient httpClient,
@@ -433,7 +445,7 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
             }
         };
 
-        var payload = root.ToJsonString(new JsonSerializerOptions { WriteIndented = false });
+        var payload = root.ToJsonString(PayloadSerializerOptions);
         return (payload, frontRetrieved, backRetrieved, retrievalFailure);
     }
 

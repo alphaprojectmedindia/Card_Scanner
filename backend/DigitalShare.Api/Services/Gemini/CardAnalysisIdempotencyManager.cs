@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using DigitalShare.Api.Data;
 using DigitalShare.Api.DTOs.CardAnalysis;
 using DigitalShare.Api.Models;
@@ -20,7 +21,12 @@ public class CardAnalysisIdempotencyManager
 {
     private readonly ApplicationDbContext _dbContext;
     private readonly ILogger<CardAnalysisIdempotencyManager> _logger;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+    };
 
     public CardAnalysisIdempotencyManager(
         ApplicationDbContext dbContext,
