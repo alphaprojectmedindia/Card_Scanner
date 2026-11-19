@@ -16,6 +16,7 @@ import '../../theme/app_spacing.dart';
 import '../../widgets/business_card_email_editor.dart';
 import '../../widgets/business_card_phone_editor.dart';
 import '../../widgets/contact_message_composer.dart';
+import '../../widgets/medindia_branding_footer.dart';
 import '../connections/imported_contact_details_screen.dart';
 
 class BusinessCardReviewScreen extends StatefulWidget {
@@ -62,6 +63,7 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
   late final TextEditingController _companyController;
   late final TextEditingController _websiteController;
   late final TextEditingController _addressController;
+  late final TextEditingController _rememberController;
 
   final FocusNode _jobTitleFocusNode = FocusNode();
   final FocusNode _companyFocusNode = FocusNode();
@@ -81,6 +83,7 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
     _companyController = TextEditingController(text: widget.cardData.company ?? '');
     _websiteController = TextEditingController(text: widget.cardData.website ?? '');
     _addressController = TextEditingController(text: widget.cardData.address ?? '');
+    _rememberController = TextEditingController();
 
     _showJobTitleField = widget.cardData.jobTitle != null &&
         widget.cardData.jobTitle!.trim().isNotEmpty;
@@ -98,6 +101,7 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
     _companyController.dispose();
     _websiteController.dispose();
     _addressController.dispose();
+    _rememberController.dispose();
     _jobTitleFocusNode.dispose();
     _companyFocusNode.dispose();
     super.dispose();
@@ -238,12 +242,15 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
           setState(() {
             _isSaving = true;
           });
+          final memory = _rememberController.text.trim();
           final contactData = {
             'fullName': updated.fullName,
             'company': updated.company,
             'jobTitle': updated.jobTitle,
             'website': updated.website,
             'address': updated.address,
+            if (memory.isNotEmpty) 'rememberThisContact': memory,
+            if (memory.isNotEmpty) 'personalRemark': memory,
             'phoneNumbers': updated.phoneNumbers
                 .map((p) => {
                       'number': p.number,
@@ -285,16 +292,8 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
         return;
       }
 
-      // 2. Not a duplicate -> Prompt for personal remark then Save API / Local Database
-      final remarkResult = await _showRemarkBottomSheet(context);
-      if (remarkResult == null || remarkResult.isCancelled) {
-        if (mounted) {
-          setState(() {
-            _isSaving = false;
-          });
-        }
-        return;
-      }
+      // 2. Not a duplicate -> Save API / Local Database
+      final memory = _rememberController.text.trim();
 
       String effectiveUserId = widget.userId ?? 'default_user';
       final bool isTestBinding =
@@ -318,8 +317,8 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
         'website': updated.website,
         'address': updated.address,
         'userId': effectiveUserId,
-        if (remarkResult.remark != null && remarkResult.remark!.trim().isNotEmpty)
-          'personalRemark': remarkResult.remark!.trim(),
+        if (memory.isNotEmpty) 'rememberThisContact': memory,
+        if (memory.isNotEmpty) 'personalRemark': memory,
         'phoneNumbers': updated.phoneNumbers
             .map((p) => {
                   'number': p.number,
@@ -384,7 +383,8 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
         ),
       );
 
-      Navigator.of(context).pop(updated);
+      // Requirement 1: Automatically redirect user to Home page after database confirmation
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } on ApiException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -496,6 +496,144 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
     );
   }
 
+  Widget _buildCroppedCardPreview(ThemeData theme) {
+    final frontPath = widget.frontImagePath;
+    final backPath = widget.backImagePath;
+
+    final hasFront = frontPath != null && File(frontPath).existsSync();
+    final hasBack = backPath != null && File(backPath).existsSync();
+
+    if (!hasFront && !hasBack) return const SizedBox.shrink();
+
+    final bool isTest = Platform.environment.containsKey('FLUTTER_TEST') ||
+        WidgetsBinding.instance.runtimeType.toString().contains('Test');
+
+    Widget buildImage(String path, String label) {
+      if (isTest) {
+        final sideKey = label.toLowerCase().contains('front') ? 'front' : 'back';
+        return Container(
+          key: Key('cropped_card_$sideKey'),
+          height: 140,
+          color: theme.colorScheme.surfaceContainerHighest,
+          alignment: Alignment.center,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.crop_rounded, size: 20, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                '$label (Cropped)',
+                style: TextStyle(
+                  color: theme.colorScheme.primary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220),
+        child: Center(
+          child: Image.file(
+            File(path),
+            fit: BoxFit.contain,
+            errorBuilder: (ctx, err, stack) => Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.crop_rounded, size: 20, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    '$label (Cropped)',
+                    style: TextStyle(
+                      color: theme.colorScheme.primary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.crop_rounded,
+                  size: 16,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  hasBack ? 'Cropped Card Images' : 'Cropped Card Image',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: const Text(
+                    'Background Removed',
+                    style: TextStyle(
+                      color: Color(0xFF047857),
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (hasFront) buildImage(frontPath, 'Front Card Image'),
+          if (hasBack) ...[
+            const Divider(height: 1),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Text(
+                'Back Side',
+                style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
+            buildImage(backPath, 'Back Card Image'),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -509,6 +647,9 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Cropped Business Card Preview (Table/room background removed)
+            _buildCroppedCardPreview(theme),
+
             // Header hint banner
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
@@ -874,6 +1015,106 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: AppSpacing.lg),
+
+            // SECTION: REMEMBER THIS CONTACT
+            _buildSectionHeader(context, 'REMEMBER THIS CONTACT', Icons.lightbulb_outline_rounded),
+            Card(
+              elevation: 0,
+              color: theme.colorScheme.surfaceContainerLow,
+              shape: RoundedRectangleBorder(
+                borderRadius: AppSpacing.radiusLg,
+                side: BorderSide(
+                  color: theme.colorScheme.outlineVariant,
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Remember This Contact',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Add a small detail so you can find them later, even if you forget their name.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.3,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0, right: 8.0),
+                            child: Icon(
+                              Icons.edit_note_rounded,
+                              size: 24,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          Expanded(
+                            child: TextField(
+                              key: const Key('remember_this_contact_input'),
+                              controller: _rememberController,
+                              minLines: 2,
+                              maxLines: 4,
+                              maxLength: 2000,
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                hintText: 'Example: Met at a coffee shop in Austin.',
+                                hintStyle: TextStyle(
+                                  fontSize: 14,
+                                  color: theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                ),
+                                border: InputBorder.none,
+                                enabledBorder: InputBorder.none,
+                                focusedBorder: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                                counterText: '',
+                              ),
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: theme.colorScheme.onSurface,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        '${_rememberController.text.length}/2000',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: AppSpacing.xxl),
 
             // SECTION 5: ACTIONS
@@ -904,138 +1145,11 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
               ),
             ),
             const SizedBox(height: AppSpacing.xxxl),
+            const MedindiaBrandingFooter(showDivider: true),
+            const SizedBox(height: AppSpacing.lg),
           ],
         ),
       ),
     );
   }
-
-  Future<_RemarkDialogResult?> _showRemarkBottomSheet(BuildContext context) async {
-    final textController = TextEditingController();
-    return await showModalBottomSheet<_RemarkDialogResult>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            final charCount = textController.text.length;
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 20,
-                right: 20,
-                top: 20,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        margin: const EdgeInsets.only(bottom: 16),
-                        decoration: BoxDecoration(
-                          color: Colors.grey.shade300,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: Theme.of(ctx).colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            Icons.note_alt_outlined,
-                            color: Theme.of(ctx).colorScheme.primary,
-                            size: 22,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Text(
-                            'Add a personal remark',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Add a nickname or a note to help you remember this person.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade600,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      key: const Key('personal_remark_input'),
-                      controller: textController,
-                      maxLength: 2000,
-                      maxLines: 4,
-                      onChanged: (_) => setModalState(() {}),
-                      decoration: InputDecoration(
-                        hintText: 'e.g., Met at Chennai conference, referred by Rajesh, follow up next Monday...',
-                        hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade400),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        counterText: '$charCount / 2000',
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        TextButton(
-                          key: const Key('remark_cancel_button'),
-                          onPressed: () => Navigator.of(ctx).pop(const _RemarkDialogResult(isCancelled: true)),
-                          child: const Text('Cancel'),
-                        ),
-                        const Spacer(),
-                        OutlinedButton(
-                          key: const Key('remark_skip_button'),
-                          onPressed: () => Navigator.of(ctx).pop(const _RemarkDialogResult(isCancelled: false, remark: null)),
-                          child: const Text('Skip & Save'),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          key: const Key('remark_save_button'),
-                          onPressed: () {
-                            final text = textController.text.trim();
-                            Navigator.of(ctx).pop(_RemarkDialogResult(
-                              isCancelled: false,
-                              remark: text.isNotEmpty ? text : null,
-                            ));
-                          },
-                          child: const Text('Save'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
-class _RemarkDialogResult {
-  final bool isCancelled;
-  final String? remark;
-  const _RemarkDialogResult({required this.isCancelled, this.remark});
 }

@@ -3,6 +3,7 @@ using System.Text;
 using DigitalShare.Api.Configuration;
 using DigitalShare.Api.Data;
 using DigitalShare.Api.DTOs.Auth;
+using DigitalShare.Api.DTOs.Consent;
 using DigitalShare.Api.Models;
 using DigitalShare.Api.Services.Storage;
 using Microsoft.AspNetCore.Identity;
@@ -89,11 +90,26 @@ public class AuthService : IAuthService
 
     public async Task<(bool Success, AuthResponse? Response, IEnumerable<string>? Errors)> RegisterAsync(RegisterRequest request)
     {
+        if (!request.TermsAccepted)
+        {
+            return (false, null, new[] { "Accepting the Terms and Conditions and Privacy Policy is required." });
+        }
+
         var normalizedEmail = request.Email.Trim().ToLowerInvariant();
         var existingUser = await _userManager.FindByEmailAsync(normalizedEmail);
         if (existingUser != null)
         {
             return (false, null, new[] { "A user with this email address already exists." });
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            var normalizedPhone = request.PhoneNumber.Trim();
+            var existingPhoneUser = await _userManager.Users.FirstOrDefaultAsync(u => u.PhoneNumber == normalizedPhone);
+            if (existingPhoneUser != null)
+            {
+                return (false, null, new[] { "An account with this mobile number already exists." });
+            }
         }
 
         var user = new ApplicationUser
@@ -124,6 +140,22 @@ public class AuthService : IAuthService
 
         _dbContext.UserProfiles.Add(profile);
 
+        // Record initial mandatory legal consent
+        var initialConsent = new UserConsent
+        {
+            Id = Guid.NewGuid(),
+            UserId = user.Id,
+            TermsVersion = "2026.1",
+            PrivacyPolicyVersion = "2026.1",
+            CookiePolicyVersion = "2026.1",
+            Jurisdiction = !string.IsNullOrWhiteSpace(request.Jurisdiction) ? request.Jurisdiction.Trim().ToUpperInvariant() : "IN",
+            EssentialAccepted = true,
+            AnalyticsAccepted = request.AnalyticsAccepted,
+            ConsentTimestampUtc = now,
+            Status = "Active"
+        };
+        _dbContext.UserConsents.Add(initialConsent);
+
         // Issue short-lived access JWT + rotating refresh token
         var (token, expirationUtc) = _jwtTokenGenerator.GenerateToken(user);
         var (refreshTokenEntity, rawRefreshToken) = CreateRefreshTokenRecord(user.Id);
@@ -149,17 +181,29 @@ public class AuthService : IAuthService
 
     public async Task<(bool Success, AuthResponse? Response, string? Error)> LoginAsync(LoginRequest request)
     {
-        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-        var user = await _userManager.FindByEmailAsync(normalizedEmail);
+        ApplicationUser? user = null;
+
+        if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            var normalizedPhone = request.PhoneNumber.Trim();
+            user = await _userManager.Users.FirstOrDefaultAsync(u => u.PhoneNumber == normalizedPhone);
+        }
+
+        if (user == null && !string.IsNullOrWhiteSpace(request.Email))
+        {
+            var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+            user = await _userManager.FindByEmailAsync(normalizedEmail);
+        }
+
         if (user == null)
         {
-            return (false, null, "Invalid email or password.");
+            return (false, null, "Invalid mobile number, email, or password.");
         }
 
         var isPasswordValid = await _userManager.CheckPasswordAsync(user, request.Password);
         if (!isPasswordValid)
         {
-            return (false, null, "Invalid email or password.");
+            return (false, null, "Invalid mobile number, email, or password.");
         }
 
         // Issue short-lived access JWT + rotating refresh token
@@ -179,7 +223,7 @@ public class AuthService : IAuthService
             AccessTokenExpiresAt = expirationUtc,
             RefreshTokenExpiresAt = refreshTokenEntity.ExpiresAtUtc,
             UserId = user.Id,
-            Email = user.Email ?? normalizedEmail
+            Email = user.Email ?? request.Email ?? string.Empty
         };
 
         return (true, response, null);
@@ -474,5 +518,84 @@ public class AuthService : IAuthService
 
         _logger.LogInformation("Account and associated data completely and permanently deleted for user {UserId}", userId);
         return (true, null);
+    }
+
+    public async Task<ConsentStatusResponse> GetConsentStatusAsync(string userId)
+    {
+        const string currentTerms = "2026.1";
+        const string currentPrivacy = "2026.1";
+        const string currentCookies = "2026.1";
+
+        var latestConsent = await _dbContext.UserConsents
+            .Where(c => c.UserId == userId && c.Status == "Active")
+            .OrderByDescending(c => c.ConsentTimestampUtc)
+            .FirstOrDefaultAsync();
+
+        if (latestConsent == null)
+        {
+            return new ConsentStatusResponse
+            {
+                HasAcceptedCurrentTerms = false,
+                CurrentTermsVersion = currentTerms,
+                CurrentPrivacyPolicyVersion = currentPrivacy,
+                CurrentCookiePolicyVersion = currentCookies,
+                Jurisdiction = "IN",
+                EssentialAccepted = false,
+                AnalyticsAccepted = false,
+                ConsentTimestampUtc = null
+            };
+        }
+
+        var isUpToDate = latestConsent.TermsVersion == currentTerms &&
+                         latestConsent.PrivacyPolicyVersion == currentPrivacy;
+
+        return new ConsentStatusResponse
+        {
+            HasAcceptedCurrentTerms = isUpToDate,
+            CurrentTermsVersion = currentTerms,
+            CurrentPrivacyPolicyVersion = currentPrivacy,
+            CurrentCookiePolicyVersion = currentCookies,
+            UserTermsVersion = latestConsent.TermsVersion,
+            UserPrivacyPolicyVersion = latestConsent.PrivacyPolicyVersion,
+            Jurisdiction = latestConsent.Jurisdiction,
+            EssentialAccepted = latestConsent.EssentialAccepted,
+            AnalyticsAccepted = latestConsent.AnalyticsAccepted,
+            ConsentTimestampUtc = latestConsent.ConsentTimestampUtc
+        };
+    }
+
+    public async Task<ConsentStatusResponse> RecordConsentAsync(
+        string userId,
+        RecordConsentRequest request,
+        string? ipAddress = null,
+        string? userAgent = null)
+    {
+        var now = DateTime.UtcNow;
+        var jurisdiction = !string.IsNullOrWhiteSpace(request.Jurisdiction)
+            ? request.Jurisdiction.Trim().ToUpperInvariant()
+            : "IN";
+
+        var consent = new UserConsent
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            TermsVersion = string.IsNullOrWhiteSpace(request.TermsVersion) ? "2026.1" : request.TermsVersion.Trim(),
+            PrivacyPolicyVersion = string.IsNullOrWhiteSpace(request.PrivacyPolicyVersion) ? "2026.1" : request.PrivacyPolicyVersion.Trim(),
+            CookiePolicyVersion = string.IsNullOrWhiteSpace(request.CookiePolicyVersion) ? "2026.1" : request.CookiePolicyVersion.Trim(),
+            Jurisdiction = jurisdiction,
+            EssentialAccepted = true,
+            AnalyticsAccepted = request.AnalyticsAccepted,
+            ConsentTimestampUtc = now,
+            Status = "Active",
+            IpAddress = ipAddress,
+            UserAgent = userAgent
+        };
+
+        _dbContext.UserConsents.Add(consent);
+        await _dbContext.SaveChangesAsync();
+
+        _logger.LogInformation("Recorded legal consent for user {UserId} in jurisdiction {Jurisdiction}", userId, jurisdiction);
+
+        return await GetConsentStatusAsync(userId);
     }
 }

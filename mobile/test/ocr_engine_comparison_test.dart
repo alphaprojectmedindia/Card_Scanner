@@ -82,6 +82,7 @@ class FakeGeometryService extends CardGeometryService {
   Future<CardGeometryResult> correctPerspectiveIfReliable(
     String imagePath, [
     ViewfinderNormalizedRect? viewfinderRoi,
+    List<Offset>? detectedNormalizedPolygon,
   ]) async {
     return CardGeometryResult.original(imagePath);
   }

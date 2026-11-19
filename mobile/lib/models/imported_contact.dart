@@ -6,6 +6,7 @@ class ImportedContact {
   final String? website;
   final String? address;
   final String? personalRemark;
+  final String? rememberThisContact;
   final DateTime? createdAtUtc;
   final DateTime? updatedAtUtc;
   final List<ImportedContactPhone> phoneNumbers;
@@ -19,11 +20,17 @@ class ImportedContact {
     this.website,
     this.address,
     this.personalRemark,
+    this.rememberThisContact,
     this.createdAtUtc,
     this.updatedAtUtc,
     this.phoneNumbers = const [],
     this.emailAddresses = const [],
   });
+
+  /// Returns the personal memory/remark note if present.
+  String? get effectiveMemory => (rememberThisContact?.trim().isNotEmpty == true)
+      ? rememberThisContact!.trim()
+      : (personalRemark?.trim().isNotEmpty == true ? personalRemark!.trim() : null);
 
   String get displayName => fullName?.trim().isNotEmpty == true
       ? fullName!.trim()
@@ -50,6 +57,7 @@ class ImportedContact {
   }
 
   factory ImportedContact.fromJson(Map<String, dynamic> json) {
+    final rawMemory = json['rememberThisContact'] as String? ?? json['personalRemark'] as String?;
     return ImportedContact(
       id: json['id'] as String? ?? '',
       fullName: json['fullName'] as String?,
@@ -57,7 +65,8 @@ class ImportedContact {
       jobTitle: json['jobTitle'] as String?,
       website: json['website'] as String?,
       address: json['address'] as String?,
-      personalRemark: json['personalRemark'] as String?,
+      personalRemark: rawMemory,
+      rememberThisContact: rawMemory,
       createdAtUtc: json['createdAtUtc'] != null
           ? DateTime.tryParse(json['createdAtUtc'] as String)
           : null,
@@ -78,6 +87,7 @@ class ImportedContact {
   }
 
   Map<String, dynamic> toJson() {
+    final memory = rememberThisContact ?? personalRemark;
     return {
       'id': id,
       if (fullName != null) 'fullName': fullName,
@@ -85,7 +95,10 @@ class ImportedContact {
       if (jobTitle != null) 'jobTitle': jobTitle,
       if (website != null) 'website': website,
       if (address != null) 'address': address,
-      if (personalRemark != null) 'personalRemark': personalRemark,
+      if (memory != null && memory.isNotEmpty) ...{
+        'personalRemark': memory,
+        'rememberThisContact': memory,
+      },
       if (createdAtUtc != null) 'createdAtUtc': createdAtUtc!.toIso8601String(),
       if (updatedAtUtc != null) 'updatedAtUtc': updatedAtUtc!.toIso8601String(),
       'phoneNumbers': phoneNumbers.map((p) => p.toJson()).toList(),

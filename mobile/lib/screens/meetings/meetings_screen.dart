@@ -6,6 +6,7 @@ import '../../services/meeting_service.dart';
 import '../../services/profile_service.dart';
 import '../../theme/app_spacing.dart';
 import '../../utils/timezone_helper.dart';
+import '../../widgets/medindia_branding_footer.dart';
 import 'meeting_details_screen.dart';
 
 class MeetingsScreen extends StatefulWidget {
@@ -391,69 +392,76 @@ class _MeetingsScreenState extends State<MeetingsScreen> {
                       ),
                     ),
                   )
-                : TabBarView(
+                : Column(
                     children: [
-                      // 1. UPCOMING TAB
-                      RefreshIndicator(
-                        onRefresh: _loadMeetings,
-                        child: (_meetings?.upcoming.isEmpty ?? true)
-                            ? _buildEmptyState(
-                                icon: Icons.event_available_outlined,
-                                title: 'No upcoming meetings.',
-                                message:
-                                    'Your accepted future appointments will appear here.',
-                              )
-                            : ListView.builder(
-                                padding: const EdgeInsets.all(AppSpacing.lg),
-                                itemCount: _meetings!.upcoming.length,
-                                itemBuilder: (context, index) {
-                                  return _buildMeetingCard(
-                                      _meetings!.upcoming[index]);
-                                },
-                              ),
-                      ),
+                      Expanded(
+                        child: TabBarView(
+                          children: [
+                            // 1. UPCOMING TAB
+                            RefreshIndicator(
+                              onRefresh: _loadMeetings,
+                              child: (_meetings?.upcoming.isEmpty ?? true)
+                                  ? _buildEmptyState(
+                                      icon: Icons.event_available_outlined,
+                                      title: 'No upcoming meetings.',
+                                      message:
+                                          'Your accepted future appointments will appear here.',
+                                    )
+                                  : ListView.builder(
+                                      padding: const EdgeInsets.all(AppSpacing.lg),
+                                      itemCount: _meetings!.upcoming.length,
+                                      itemBuilder: (context, index) {
+                                        return _buildMeetingCard(
+                                            _meetings!.upcoming[index]);
+                                      },
+                                    ),
+                            ),
 
-                      // 2. REQUESTS TAB
-                      RefreshIndicator(
-                        onRefresh: _loadMeetings,
-                        child: (_meetings?.requests.isEmpty ?? true)
-                            ? _buildEmptyState(
-                                icon: Icons.pending_actions_outlined,
-                                title: 'No meeting requests.',
-                                message:
-                                    'Pending incoming and outgoing requests will appear here.',
-                              )
-                            : ListView.builder(
-                                padding: const EdgeInsets.all(AppSpacing.lg),
-                                itemCount: _meetings!.requests.length,
-                                itemBuilder: (context, index) {
-                                  return _buildMeetingCard(
-                                    _meetings!.requests[index],
-                                    isRequestsTab: true,
-                                  );
-                                },
-                              ),
-                      ),
+                            // 2. REQUESTS TAB
+                            RefreshIndicator(
+                              onRefresh: _loadMeetings,
+                              child: (_meetings?.requests.isEmpty ?? true)
+                                  ? _buildEmptyState(
+                                      icon: Icons.pending_actions_outlined,
+                                      title: 'No meeting requests.',
+                                      message:
+                                          'Pending incoming and outgoing requests will appear here.',
+                                    )
+                                  : ListView.builder(
+                                      padding: const EdgeInsets.all(AppSpacing.lg),
+                                      itemCount: _meetings!.requests.length,
+                                      itemBuilder: (context, index) {
+                                        return _buildMeetingCard(
+                                          _meetings!.requests[index],
+                                          isRequestsTab: true,
+                                        );
+                                      },
+                                    ),
+                            ),
 
-                      // 3. HISTORY TAB
-                      RefreshIndicator(
-                        onRefresh: _loadMeetings,
-                        child: (_meetings?.history.isEmpty ?? true)
-                            ? _buildEmptyState(
-                                icon: Icons.history_rounded,
-                                title: 'No previous meetings.',
-                                message:
-                                    'Past, cancelled, and rejected meetings will be archived here.',
-                              )
-                            : ListView.builder(
-                                padding: const EdgeInsets.all(AppSpacing.lg),
-                                itemCount: _meetings!.history.length,
-                                itemBuilder: (context, index) {
-                                  return _buildMeetingCard(
-                                      _meetings!.history[index]);
-                                },
-                              ),
+                            // 3. HISTORY TAB
+                            RefreshIndicator(
+                              onRefresh: _loadMeetings,
+                              child: (_meetings?.history.isEmpty ?? true)
+                                  ? _buildEmptyState(
+                                      icon: Icons.history_rounded,
+                                      title: 'No previous meetings.',
+                                      message:
+                                          'Past, cancelled, and rejected meetings will be archived here.',
+                                    )
+                                  : ListView.builder(
+                                      padding: const EdgeInsets.all(AppSpacing.lg),
+                                      itemCount: _meetings!.history.length,
+                                      itemBuilder: (context, index) {
+                                        return _buildMeetingCard(
+                                            _meetings!.history[index]);
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
                       ),
+                      const MedindiaBrandingFooter(showDivider: true),
                     ],
                   ),
       ),

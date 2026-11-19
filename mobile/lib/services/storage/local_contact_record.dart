@@ -25,6 +25,7 @@ class LocalContactRecord {
   final String? website;
   final String? address;
   final String? personalRemark;
+  final String? rememberThisContact;
   final List<ImportedContactPhone> phoneNumbers;
   final List<ImportedContactEmail> emailAddresses;
   final ContactSyncStatus syncStatus;
@@ -92,6 +93,7 @@ class LocalContactRecord {
     this.website,
     this.address,
     this.personalRemark,
+    this.rememberThisContact,
     this.phoneNumbers = const [],
     this.emailAddresses = const [],
     this.syncStatus = ContactSyncStatus.synced,
@@ -228,6 +230,7 @@ class LocalContactRecord {
 
   /// Converts this record to the user-facing [ImportedContact] model.
   ImportedContact toImportedContact() {
+    final memory = rememberThisContact ?? personalRemark;
     return ImportedContact(
       id: id,
       fullName: fullName,
@@ -235,7 +238,8 @@ class LocalContactRecord {
       jobTitle: jobTitle,
       website: website,
       address: address,
-      personalRemark: personalRemark,
+      personalRemark: memory,
+      rememberThisContact: memory,
       createdAtUtc: createdAt.toUtc(),
       updatedAtUtc: updatedAt.toUtc(),
       phoneNumbers: phoneNumbers,
@@ -304,7 +308,8 @@ class LocalContactRecord {
       jobTitle: contact.jobTitle,
       website: contact.website,
       address: contact.address,
-      personalRemark: contact.personalRemark,
+      personalRemark: contact.effectiveMemory,
+      rememberThisContact: contact.effectiveMemory,
       phoneNumbers: contact.phoneNumbers,
       emailAddresses: contact.emailAddresses,
       syncStatus: syncStatus,
@@ -341,6 +346,8 @@ class LocalContactRecord {
     String? address,
     String? personalRemark,
     bool clearPersonalRemark = false,
+    String? rememberThisContact,
+    bool clearRememberThisContact = false,
     List<ImportedContactPhone>? phoneNumbers,
     List<ImportedContactEmail>? emailAddresses,
     ContactSyncStatus? syncStatus,
@@ -373,7 +380,12 @@ class LocalContactRecord {
       jobTitle: jobTitle ?? this.jobTitle,
       website: website ?? this.website,
       address: address ?? this.address,
-      personalRemark: clearPersonalRemark ? null : (personalRemark ?? this.personalRemark),
+      personalRemark: (clearPersonalRemark || clearRememberThisContact)
+          ? null
+          : (rememberThisContact ?? personalRemark ?? this.rememberThisContact ?? this.personalRemark),
+      rememberThisContact: (clearPersonalRemark || clearRememberThisContact)
+          ? null
+          : (rememberThisContact ?? personalRemark ?? this.rememberThisContact ?? this.personalRemark),
       phoneNumbers: phoneNumbers ?? this.phoneNumbers,
       emailAddresses: emailAddresses ?? this.emailAddresses,
       syncStatus: syncStatus ?? this.syncStatus,
@@ -410,7 +422,10 @@ class LocalContactRecord {
       if (jobTitle != null) 'jobTitle': jobTitle,
       if (website != null) 'website': website,
       if (address != null) 'address': address,
-      if (personalRemark != null) 'personalRemark': personalRemark,
+      if ((rememberThisContact ?? personalRemark) != null)
+        'personalRemark': rememberThisContact ?? personalRemark,
+      if ((rememberThisContact ?? personalRemark) != null)
+        'rememberThisContact': rememberThisContact ?? personalRemark,
       'phoneNumbers': phoneNumbers.map((p) => p.toJson()).toList(),
       'emailAddresses': emailAddresses.map((e) => e.toJson()).toList(),
       'syncStatus': syncStatus.name,
@@ -475,7 +490,8 @@ class LocalContactRecord {
       jobTitle: json['jobTitle'] as String?,
       website: json['website'] as String?,
       address: json['address'] as String?,
-      personalRemark: json['personalRemark'] as String?,
+      personalRemark: json['rememberThisContact'] as String? ?? json['personalRemark'] as String?,
+      rememberThisContact: json['rememberThisContact'] as String? ?? json['personalRemark'] as String?,
       phoneNumbers: (json['phoneNumbers'] as List<dynamic>?)
               ?.map((p) => ImportedContactPhone.fromJson(p as Map<String, dynamic>))
               .toList() ??

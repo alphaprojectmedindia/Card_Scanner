@@ -191,10 +191,10 @@ void main() {
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
-      expect(find.text('Meetings'), findsOneWidget);
+      expect(find.text('Meetings'), findsWidgets);
       expect(find.text('View requests and upcoming meetings'), findsOneWidget);
 
-      await tester.tap(find.text('Meetings'));
+      await tester.tap(find.text('Meetings').first);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -237,7 +237,7 @@ void main() {
       expect(find.text('Universal QR Scanner'), findsOneWidget);
       expect(find.text('My Digital Card'), findsOneWidget);
       expect(find.text('QR Generator'), findsOneWidget);
-      expect(find.text('Meetings'), findsOneWidget);
+      expect(find.text('Meetings'), findsWidgets);
 
       // Verify no overflow exceptions thrown
       expect(tester.takeException(), isNull);

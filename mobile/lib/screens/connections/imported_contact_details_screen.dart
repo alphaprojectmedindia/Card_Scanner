@@ -11,6 +11,7 @@ import '../../services/ocr/ml_kit_ocr_engine.dart';
 import '../../services/ocr/paddle_ocr_engine.dart';
 import '../../widgets/contact_message_composer.dart';
 import '../../widgets/historical_reprocess_diff_dialog.dart';
+import '../../widgets/medindia_branding_footer.dart';
 import 'edit_imported_contact_screen.dart';
 
 class ImportedContactDetailsScreen extends StatefulWidget {
@@ -482,15 +483,15 @@ class _ImportedContactDetailsScreenState
                               TextButton.icon(
                                 key: const Key('edit_remark_button'),
                                 icon: Icon(
-                                  _contact.personalRemark != null &&
-                                          _contact.personalRemark!.isNotEmpty
+                                  _contact.effectiveMemory != null &&
+                                          _contact.effectiveMemory!.isNotEmpty
                                       ? Icons.edit_outlined
                                       : Icons.add_comment_outlined,
                                   size: 16,
                                 ),
                                 label: Text(
-                                  _contact.personalRemark != null &&
-                                          _contact.personalRemark!.isNotEmpty
+                                  _contact.effectiveMemory != null &&
+                                          _contact.effectiveMemory!.isNotEmpty
                                       ? 'Edit'
                                       : 'Add Remark',
                                 ),
@@ -500,20 +501,20 @@ class _ImportedContactDetailsScreenState
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            _contact.personalRemark != null &&
-                                    _contact.personalRemark!.isNotEmpty
-                                ? _contact.personalRemark!
+                            _contact.effectiveMemory != null &&
+                                    _contact.effectiveMemory!.isNotEmpty
+                                ? _contact.effectiveMemory!
                                 : 'No personal remark added yet.',
                             key: const Key('contact_details_personal_remark_text'),
                             style: TextStyle(
                               fontSize: 14,
                               height: 1.4,
-                              fontStyle: _contact.personalRemark != null &&
-                                      _contact.personalRemark!.isNotEmpty
+                              fontStyle: _contact.effectiveMemory != null &&
+                                      _contact.effectiveMemory!.isNotEmpty
                                   ? FontStyle.normal
                                   : FontStyle.italic,
-                              color: _contact.personalRemark != null &&
-                                      _contact.personalRemark!.isNotEmpty
+                              color: _contact.effectiveMemory != null &&
+                                      _contact.effectiveMemory!.isNotEmpty
                                   ? theme.colorScheme.onSurface
                                   : theme.colorScheme.onSurfaceVariant,
                             ),
@@ -551,6 +552,7 @@ class _ImportedContactDetailsScreenState
                     contactService: widget.phoneContactService,
                   ),
                   const SizedBox(height: 24),
+                  const MedindiaBrandingFooter(showDivider: true),
                 ],
               ),
             ),
@@ -571,9 +573,9 @@ class _ImportedContactDetailsScreenState
   Future<void> _showEditRemarkDialog(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     final textController =
-        TextEditingController(text: _contact.personalRemark ?? '');
+        TextEditingController(text: _contact.effectiveMemory ?? '');
     final bool hasExisting =
-        _contact.personalRemark != null && _contact.personalRemark!.isNotEmpty;
+        _contact.effectiveMemory != null && _contact.effectiveMemory!.isNotEmpty;
 
     await showDialog<void>(
       context: context,

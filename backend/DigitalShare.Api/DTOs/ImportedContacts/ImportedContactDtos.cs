@@ -44,6 +44,9 @@ public class SaveImportedContactRequest
     [MaxLength(500, ErrorMessage = "Address cannot exceed 500 characters.")]
     public string? Address { get; set; }
 
+    [MaxLength(2000, ErrorMessage = "Remember this contact memory cannot exceed 2,000 characters.")]
+    public string? RememberThisContact { get; set; }
+
     [MaxLength(2000, ErrorMessage = "Personal remark cannot exceed 2,000 characters.")]
     public string? PersonalRemark { get; set; }
 
@@ -67,6 +70,9 @@ public class UpdateImportedContactRequest
 
     [MaxLength(500, ErrorMessage = "Address cannot exceed 500 characters.")]
     public string? Address { get; set; }
+
+    [MaxLength(2000, ErrorMessage = "Remember this contact memory cannot exceed 2,000 characters.")]
+    public string? RememberThisContact { get; set; }
 
     [MaxLength(2000, ErrorMessage = "Personal remark cannot exceed 2,000 characters.")]
     public string? PersonalRemark { get; set; }
@@ -97,6 +103,7 @@ public class ImportedContactResponse
     public string? JobTitle { get; set; }
     public string? Website { get; set; }
     public string? Address { get; set; }
+    public string? RememberThisContact { get; set; }
     public string? PersonalRemark { get; set; }
     public DateTime CreatedAtUtc { get; set; }
     public DateTime UpdatedAtUtc { get; set; }
@@ -107,8 +114,17 @@ public class ImportedContactResponse
 
 public class UpdateContactRemarkRequest
 {
+    [MaxLength(2000, ErrorMessage = "Remember this contact memory cannot exceed 2,000 characters.")]
+    public string? RememberThisContact { get; set; }
+
     [MaxLength(2000, ErrorMessage = "Personal remark cannot exceed 2,000 characters.")]
     public string? Remark { get; set; }
+}
+
+public class UpdateContactMemoryRequest
+{
+    [MaxLength(2000, ErrorMessage = "Remember this contact memory cannot exceed 2,000 characters.")]
+    public string? Memory { get; set; }
 }
 
 public class ImportedContactPhoneResponse

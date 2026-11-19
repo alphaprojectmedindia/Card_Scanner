@@ -176,5 +176,33 @@ void main() {
       expect(returnedData!.fullName, 'Rahul K. Sharma');
       expect(returnedData!.company, 'ABC Technologies');
     });
+
+    testWidgets('Renders REMEMBER THIS CONTACT section and character counter', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BusinessCardReviewScreen(cardData: sampleData),
+        ),
+      );
+
+      // Verify section header and description
+      expect(find.text('REMEMBER THIS CONTACT'), findsOneWidget);
+      expect(find.text('Remember This Contact'), findsOneWidget);
+      expect(
+        find.text('Add a small detail so you can find them later, even if you forget their name.'),
+        findsOneWidget,
+      );
+
+      // Verify text field and placeholder
+      final inputFinder = find.byKey(const Key('remember_this_contact_input'));
+      expect(inputFinder, findsOneWidget);
+      expect(find.text('Example: Met at a coffee shop in Austin.'), findsOneWidget);
+      expect(find.text('0/2000'), findsOneWidget);
+
+      // Enter memory text and verify counter updates dynamically
+      const sampleMemory = 'Met at a coffee shop in Austin.';
+      await tester.enterText(inputFinder, sampleMemory);
+      await tester.pumpAndSettle();
+      expect(find.text('${sampleMemory.length}/2000'), findsOneWidget);
+    });
   });
 }

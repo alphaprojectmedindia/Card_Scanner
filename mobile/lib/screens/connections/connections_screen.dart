@@ -7,15 +7,18 @@ import '../../services/connection_service.dart';
 import '../../services/imported_contact_service.dart';
 import '../scan/scanned_profile_screen.dart';
 import 'imported_contact_details_screen.dart';
+import '../../widgets/medindia_branding_footer.dart';
 
 class ConnectionsScreen extends StatefulWidget {
   final ConnectionService? connectionService;
   final ImportedContactService? importedContactService;
+  final int initialTab;
 
   const ConnectionsScreen({
     super.key,
     this.connectionService,
     this.importedContactService,
+    this.initialTab = 0,
   });
 
   @override
@@ -26,7 +29,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
   late final ConnectionService _connectionService;
   late final ImportedContactService _importedContactService;
 
-  int _selectedTab = 0; // 0: Digital Share, 1: Business Cards
+  late int _selectedTab; // 0: Digital Share, 1: Business Cards
 
   // Digital Share Connections state
   List<SavedConnection> _connections = [];
@@ -47,7 +50,12 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
     _connectionService = widget.connectionService ?? ConnectionService();
     _importedContactService =
         widget.importedContactService ?? ImportedContactService();
-    _loadConnections();
+    _selectedTab = widget.initialTab;
+    if (_selectedTab == 1) {
+      _loadImportedContacts();
+    } else {
+      _loadConnections();
+    }
   }
 
   Future<void> _loadConnections() async {
@@ -247,11 +255,15 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
       final job = (c.jobTitle ?? '').toLowerCase();
       final phones = c.phoneNumbers.map((p) => p.number.toLowerCase()).join(' ');
       final emails = c.emailAddresses.map((e) => e.email.toLowerCase()).join(' ');
+      final address = (c.address ?? '').toLowerCase();
+      final memory = (c.effectiveMemory ?? '').toLowerCase();
       return name.contains(query) ||
           company.contains(query) ||
           job.contains(query) ||
           phones.contains(query) ||
-          emails.contains(query);
+          emails.contains(query) ||
+          address.contains(query) ||
+          memory.contains(query);
     }).toList();
   }
 
@@ -595,6 +607,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                                 },
                               ),
           ),
+          const MedindiaBrandingFooter(showDivider: true),
         ],
       ),
     );
@@ -869,6 +882,49 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                                                       ),
                                                     ),
                                                   ],
+                                                  if (contact.effectiveMemory != null &&
+                                                      contact.effectiveMemory!.isNotEmpty) ...[
+                                                    const SizedBox(height: 6),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(
+                                                          horizontal: 8, vertical: 3),
+                                                      decoration: BoxDecoration(
+                                                        color: const Color(0xFFE8F1FC),
+                                                        borderRadius:
+                                                            BorderRadius.circular(6),
+                                                        border: Border.all(
+                                                          color: const Color(0xFFB9D5F8),
+                                                          width: 1,
+                                                        ),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          const Icon(
+                                                            Icons.lightbulb_outline_rounded,
+                                                            size: 13,
+                                                            color: Color(0xFF1E5BB0),
+                                                          ),
+                                                          const SizedBox(width: 5),
+                                                          Flexible(
+                                                            child: Text(
+                                                              'Memory: ${contact.effectiveMemory!}',
+                                                              style: const TextStyle(
+                                                                fontSize: 11,
+                                                                fontWeight:
+                                                                    FontWeight.w500,
+                                                                color:
+                                                                    Color(0xFF1E5BB0),
+                                                              ),
+                                                              maxLines: 1,
+                                                              overflow:
+                                                                  TextOverflow.ellipsis,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ],
                                               ),
                                             ),
@@ -892,6 +948,7 @@ class _ConnectionsScreenState extends State<ConnectionsScreen> {
                                 },
                               ),
           ),
+          const MedindiaBrandingFooter(showDivider: true),
         ],
       ),
     );

@@ -5,6 +5,7 @@ class CustomTextField extends StatefulWidget {
   final String label;
   final String? hint;
   final IconData? prefixIcon;
+  final Widget? prefix;
   final bool isPassword;
   final TextInputType keyboardType;
   final String? Function(String?)? validator;
@@ -18,6 +19,7 @@ class CustomTextField extends StatefulWidget {
     required this.label,
     this.hint,
     this.prefixIcon,
+    this.prefix,
     this.isPassword = false,
     this.keyboardType = TextInputType.text,
     this.validator,
@@ -61,6 +63,7 @@ class _CustomTextFieldState extends State<CustomTextField> {
               color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
             ),
             prefixIcon: widget.prefixIcon != null ? Icon(widget.prefixIcon, size: 20) : null,
+            prefix: widget.prefix,
             suffixIcon: widget.isPassword
                 ? IconButton(
                     icon: Icon(

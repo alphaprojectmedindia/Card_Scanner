@@ -30,6 +30,7 @@ import '../../services/secure_storage_service.dart';
 import '../../services/storage/local_scan_cache_manager.dart';
 import '../../services/storage/offline_scan_queue_service.dart';
 import '../../theme/app_spacing.dart';
+import '../../widgets/medindia_branding_footer.dart';
 import 'business_card_camera_screen.dart';
 import 'business_card_review_screen.dart';
 import 'ocr_engine_comparison_screen.dart';
@@ -38,6 +39,7 @@ import 'qr_scanner_screen.dart';
 class BusinessCardScanScreen extends StatefulWidget {
   final IBusinessCardOcrService? ocrService;
   final ImagePicker? imagePicker;
+  final CardGeometryService? geometryService;
   final BusinessCardParser? parser;
   final ImportedContactService? importedContactService;
   final ImageQualityService? qualityService;
@@ -58,6 +60,7 @@ class BusinessCardScanScreen extends StatefulWidget {
     super.key,
     this.ocrService,
     this.imagePicker,
+    this.geometryService,
     this.parser,
     this.importedContactService,
     this.qualityService,
@@ -86,6 +89,7 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
   late final BusinessCardParser _parser;
   late final ImportedContactService _contactService;
   late final ImageQualityService _qualityService;
+  late final CardGeometryService _geometryService;
   late final CardAnalysisService _analysisService;
   late final CardAnalysisDecisionService _decisionService;
   late final LocalScanCacheManager _scanCacheManager;
@@ -142,6 +146,7 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
           learningService: _learningService,
         );
     _qualityService = widget.qualityService ?? const ImageQualityService();
+    _geometryService = widget.geometryService ?? const CardGeometryService();
     _decisionService =
         widget.decisionService ?? const CardAnalysisDecisionService();
     _analysisService = widget.analysisService ?? CardAnalysisService();
@@ -277,6 +282,7 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
           builder: (_) => BusinessCardCameraScreen(
             side: side,
             qualityService: _qualityService,
+            geometryService: _geometryService,
           ),
         ),
       );
@@ -343,14 +349,22 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
         }
       }
 
+      String stagedPath = pickedFile.path;
+      try {
+        final geom = await _geometryService.correctPerspectiveIfReliable(pickedFile.path);
+        if (geom.wasCorrected || geom.wasRoiCropped) {
+          stagedPath = geom.imagePath;
+        }
+      } catch (_) {}
+
       setState(() {
         _scanSessionId++;
         if (side == CardSide.front) {
-          _frontImagePath = pickedFile.path;
+          _frontImagePath = stagedPath;
           _frontImageSource = source == ImageSource.camera ? 'camera' : 'gallery';
           _showPhysicalOptions = false;
         } else {
-          _backImagePath = pickedFile.path;
+          _backImagePath = stagedPath;
           _backImageSource = source == ImageSource.camera ? 'camera' : 'gallery';
         }
       });
@@ -1297,9 +1311,15 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
         children: [
           SingleChildScrollView(
             padding: AppSpacing.pagePadding,
-            child: isStaged
-                ? _buildStagingView(theme)
-                : _buildModeSelectionView(theme),
+            child: Column(
+              children: [
+                isStaged
+                    ? _buildStagingView(theme)
+                    : _buildModeSelectionView(theme),
+                const SizedBox(height: AppSpacing.md),
+                const MedindiaBrandingFooter(showDivider: true),
+              ],
+            ),
           ),
 
           // Processing Loading Overlay

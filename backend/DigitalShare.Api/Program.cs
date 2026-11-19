@@ -13,7 +13,32 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using Npgsql;
+
+// Load local .env file into environment variables if present
+var envFilePath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
+if (!File.Exists(envFilePath))
+{
+    // Also check project directory in case running from bin
+    envFilePath = Path.Combine(AppContext.BaseDirectory, ".env");
+}
+if (File.Exists(envFilePath))
+{
+    foreach (var line in File.ReadAllLines(envFilePath))
+    {
+        var trimmed = line.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith('#')) continue;
+        var separatorIndex = trimmed.IndexOf('=');
+        if (separatorIndex > 0)
+        {
+            var key = trimmed.Substring(0, separatorIndex).Trim();
+            var val = trimmed.Substring(separatorIndex + 1).Trim();
+            if (Environment.GetEnvironmentVariable(key) == null)
+            {
+                Environment.SetEnvironmentVariable(key, val);
+            }
+        }
+    }
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,12 +57,20 @@ var jwtOptions = builder.Configuration
     .GetSection(JwtOptions.SectionName)
     .Get<JwtOptions>() ?? new JwtOptions();
 
-// 2. Database Context (Supports standard connection strings and Render/Heroku DATABASE_URL URI format)
-var connectionString = ResolvePostgreSqlConnectionString(builder.Configuration, out var dbDiagnostic);
+// 2. Database Context (Supports standard MySQL connection strings and DATABASE_URL URI format)
+var connectionString = ResolveMySqlConnectionString(builder.Configuration, out var dbDiagnostic);
 Console.WriteLine(dbDiagnostic.ToString());
+
+var serverVersion = new MySqlServerVersion(new Version(8, 0, 36));
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
-    options.UseNpgsql(connectionString);
+    options.UseMySql(connectionString, serverVersion, mySqlOptions =>
+    {
+        mySqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorNumbersToAdd: null);
+    });
 });
 
 // 3. ASP.NET Core Identity
@@ -121,6 +154,7 @@ builder.Services.AddScoped<IImportedContactService, ImportedContactService>();
 builder.Services.AddSingleton<ITimeZoneService, TimeZoneService>();
 builder.Services.AddScoped<IAvailabilityService, AvailabilityService>();
 builder.Services.AddScoped<IMeetingService, MeetingService>();
+builder.Services.AddSingleton<ILegalDocumentService, LegalDocumentService>();
 
 // 5b. Gemini AI Business Card Analysis Services
 builder.Services.Configure<GeminiOptions>(
@@ -261,7 +295,7 @@ app.UseAuthorization();
 // Render and uptime monitoring health check endpoint (liveness probe)
 app.MapHealthChecks("/health");
 
-// Database readiness check endpoint: verifies PostgreSQL database connectivity and migration synchronization
+// Database readiness check endpoint: verifies MySQL database connectivity and migration synchronization
 app.MapGet("/health/ready", async (ApplicationDbContext db, ILogger<Program> logger) =>
 {
     try
@@ -333,53 +367,59 @@ app.Run();
 public partial class Program
 {
     /// <summary>
-    /// Resolves PostgreSQL connection string from either explicit Render/Heroku/Supabase DATABASE_URL or ConnectionStrings:DefaultConnection.
+    /// Resolves MySQL connection string from either explicit DATABASE_URL, ConnectionStrings:DefaultConnection, or MYSQL_CONNECTION_STRING.
     /// Priority is given to DATABASE_URL so production cloud environment variables override local development appsettings.json.
     /// Returns safe diagnostics without logging sensitive credentials.
     /// </summary>
-    public static string ResolvePostgreSqlConnectionString(IConfiguration configuration)
+    public static string ResolveMySqlConnectionString(IConfiguration configuration)
     {
-        return ResolvePostgreSqlConnectionString(configuration, out _);
+        return ResolveMySqlConnectionString(configuration, out _);
     }
 
     /// <summary>
-    /// Resolves PostgreSQL connection string with diagnostic information.
+    /// Resolves MySQL connection string with diagnostic information.
     /// </summary>
-    public static string ResolvePostgreSqlConnectionString(IConfiguration configuration, out PostgreSqlConnectionDiagnostic diagnostic)
+    public static string ResolveMySqlConnectionString(IConfiguration configuration, out MySqlConnectionDiagnostic diagnostic)
     {
-        // 1. Priority 1: DATABASE_URL environment variable (Render, Supabase, Railway, Heroku)
+        // 1. Priority 1: DATABASE_URL environment variable (Hostinger, Render, Railway, Docker)
         var databaseUrl = configuration["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
         if (!string.IsNullOrWhiteSpace(databaseUrl))
         {
-            return PostgreSqlConnectionParser.ParseToConnectionString(databaseUrl, out diagnostic);
+            return MySqlConnectionParser.ParseToConnectionString(databaseUrl, out diagnostic);
         }
 
         // 2. Priority 2: Explicit ConnectionStrings:DefaultConnection
         var connectionString = configuration.GetConnectionString("DefaultConnection");
         if (!string.IsNullOrWhiteSpace(connectionString))
         {
-            return PostgreSqlConnectionParser.ParseToConnectionString(connectionString, out diagnostic);
+            return MySqlConnectionParser.ParseToConnectionString(connectionString, out diagnostic);
         }
 
-        diagnostic = new PostgreSqlConnectionDiagnostic(
+        // 3. Priority 3: Explicit MYSQL_CONNECTION_STRING environment variable
+        var mysqlConnectionString = configuration["MYSQL_CONNECTION_STRING"] ?? Environment.GetEnvironmentVariable("MYSQL_CONNECTION_STRING");
+        if (!string.IsNullOrWhiteSpace(mysqlConnectionString))
+        {
+            return MySqlConnectionParser.ParseToConnectionString(mysqlConnectionString, out diagnostic);
+        }
+
+        diagnostic = new MySqlConnectionDiagnostic(
             Success: false,
             Scheme: string.Empty,
             Host: string.Empty,
             Port: 0,
             Database: string.Empty,
-            SslMode: string.Empty,
+            CharSet: string.Empty,
             HasUsername: false,
             HasPassword: false,
-            ErrorMessage: "No database connection string configured.");
+            ErrorMessage: "No MySQL database connection string configured.");
         return string.Empty;
     }
 
     /// <summary>
-    /// Converts a postgres:// or postgresql:// URI (as supplied by Render/Heroku/Supabase) into an Npgsql key-value connection string.
-    /// Backward-compatible overload.
+    /// Converts a mysql:// or mariadb:// URI into a MySqlConnector key-value connection string.
     /// </summary>
-    public static string ConvertPostgreSqlUriToNpgsqlConnectionString(string databaseUrl)
+    public static string ConvertMySqlUriToConnectionString(string databaseUrl)
     {
-        return PostgreSqlConnectionParser.ParseToConnectionString(databaseUrl, out _);
+        return MySqlConnectionParser.ParseToConnectionString(databaseUrl, out _);
     }
 }

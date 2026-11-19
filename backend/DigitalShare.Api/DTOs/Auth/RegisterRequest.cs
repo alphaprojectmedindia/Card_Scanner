@@ -21,4 +21,11 @@ public class RegisterRequest
     [Phone(ErrorMessage = "Please provide a valid phone number.")]
     [MaxLength(30)]
     public string? PhoneNumber { get; set; }
+
+    public bool TermsAccepted { get; set; } = true;
+
+    [MaxLength(20)]
+    public string? Jurisdiction { get; set; } = "IN";
+
+    public bool AnalyticsAccepted { get; set; } = false;
 }

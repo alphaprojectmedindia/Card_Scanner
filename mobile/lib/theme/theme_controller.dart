@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 /// Manages and persists the application's ThemeMode (light, dark, or system).
@@ -46,6 +47,24 @@ class ThemeController extends ChangeNotifier {
     if (_themeMode == mode && _isInitialized) return;
     _themeMode = mode;
     notifyListeners();
+
+    if (mode == ThemeMode.light) {
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ));
+    } else if (mode == ThemeMode.dark) {
+      SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
+        systemNavigationBarColor: Color(0xFF111827),
+        systemNavigationBarIconBrightness: Brightness.light,
+      ));
+    }
 
     try {
       String modeString = 'system';

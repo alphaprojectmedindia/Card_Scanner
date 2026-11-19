@@ -644,3 +644,70 @@ BEGIN
 END $EF$;
 COMMIT;
 
+START TRANSACTION;
+
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261117064328_AddRememberThisContact') THEN
+    ALTER TABLE "ImportedBusinessCards" ADD "RememberThisContact" character varying(2000);
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261117064328_AddRememberThisContact') THEN
+    UPDATE "ImportedBusinessCards" SET "RememberThisContact" = "PersonalRemark" WHERE "RememberThisContact" IS NULL AND "PersonalRemark" IS NOT NULL;
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261117064328_AddRememberThisContact') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20261117064328_AddRememberThisContact', '8.0.11');
+    END IF;
+END $EF$;
+COMMIT;
+
+START TRANSACTION;
+
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118051918_AddUserConsentsTable') THEN
+    CREATE TABLE "UserConsents" (
+        "Id" uuid NOT NULL,
+        "UserId" text NOT NULL,
+        "TermsVersion" character varying(50) NOT NULL,
+        "PrivacyPolicyVersion" character varying(50) NOT NULL,
+        "CookiePolicyVersion" character varying(50) NOT NULL,
+        "Jurisdiction" character varying(20) NOT NULL,
+        "EssentialAccepted" boolean NOT NULL,
+        "AnalyticsAccepted" boolean NOT NULL,
+        "ConsentTimestampUtc" timestamp with time zone NOT NULL,
+        "Status" character varying(30) NOT NULL,
+        "IpAddress" character varying(100),
+        "UserAgent" character varying(500),
+        CONSTRAINT "PK_UserConsents" PRIMARY KEY ("Id"),
+        CONSTRAINT "FK_UserConsents_AspNetUsers_UserId" FOREIGN KEY ("UserId") REFERENCES "AspNetUsers" ("Id") ON DELETE CASCADE
+    );
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118051918_AddUserConsentsTable') THEN
+    CREATE INDEX "IX_UserConsents_UserId_ConsentTimestampUtc" ON "UserConsents" ("UserId", "ConsentTimestampUtc");
+    END IF;
+END $EF$;
+
+DO $EF$
+BEGIN
+    IF NOT EXISTS(SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20261118051918_AddUserConsentsTable') THEN
+    INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+    VALUES ('20261118051918_AddUserConsentsTable', '8.0.11');
+    END IF;
+END $EF$;
+COMMIT;
+

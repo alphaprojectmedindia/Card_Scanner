@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using DigitalShare.Api.DTOs.Auth;
 using DigitalShare.Api.DTOs.Common;
+using DigitalShare.Api.DTOs.Consent;
 using DigitalShare.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -62,6 +63,11 @@ public class AuthController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Email) && string.IsNullOrWhiteSpace(request.PhoneNumber))
+        {
+            return BadRequest(new ErrorResponse("Mobile number or email is required."));
+        }
+
         if (!ModelState.IsValid)
         {
             return BadRequest(ModelState);
@@ -70,7 +76,7 @@ public class AuthController : ControllerBase
         var (success, response, error) = await _authService.LoginAsync(request);
         if (!success)
         {
-            return Unauthorized(new ErrorResponse(error ?? "Invalid email or password."));
+            return Unauthorized(new ErrorResponse(error ?? "Invalid mobile number, email, or password."));
         }
 
         return Ok(response);
@@ -167,5 +173,52 @@ public class AuthController : ControllerBase
         }
 
         return Ok(new { message = "Account and all associated personal data have been permanently deleted." });
+    }
+
+    /// <summary>
+    /// Check whether the authenticated user has accepted the latest mandatory terms and privacy policies.
+    /// </summary>
+    [HttpGet("consent-status")]
+    [Authorize]
+    [ProducesResponseType(typeof(ConsentStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetConsentStatus()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        var status = await _authService.GetConsentStatusAsync(userId);
+        return Ok(status);
+    }
+
+    /// <summary>
+    /// Record mandatory legal consent and cookie preferences for the authenticated user.
+    /// </summary>
+    [HttpPost("consent")]
+    [Authorize]
+    [ProducesResponseType(typeof(ConsentStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> RecordConsent([FromBody] RecordConsentRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("sub");
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var userAgent = Request.Headers.UserAgent.ToString();
+
+        var status = await _authService.RecordConsentAsync(userId, request, ipAddress, userAgent);
+        return Ok(status);
     }
 }

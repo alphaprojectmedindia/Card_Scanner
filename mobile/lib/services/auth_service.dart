@@ -18,14 +18,22 @@ class AuthService {
     required String password,
     required String confirmPassword,
     String? phoneNumber,
+    bool termsAccepted = true,
+    String? jurisdiction,
+    bool analyticsAccepted = false,
   }) async {
     final body = <String, dynamic>{
       'email': email.trim(),
       'password': password,
       'confirmPassword': confirmPassword,
+      'termsAccepted': termsAccepted,
+      'analyticsAccepted': analyticsAccepted,
     };
     if (phoneNumber != null && phoneNumber.trim().isNotEmpty) {
       body['phoneNumber'] = phoneNumber.trim();
+    }
+    if (jurisdiction != null && jurisdiction.trim().isNotEmpty) {
+      body['jurisdiction'] = jurisdiction.trim();
     }
 
     final response = await _apiClient.post(
@@ -56,15 +64,23 @@ class AuthService {
   }
 
   Future<AuthResponse> login({
-    required String email,
+    String? email,
+    String? phoneNumber,
     required String password,
   }) async {
+    final body = <String, dynamic>{
+      'password': password,
+    };
+    if (email != null && email.trim().isNotEmpty) {
+      body['email'] = email.trim();
+    }
+    if (phoneNumber != null && phoneNumber.trim().isNotEmpty) {
+      body['phoneNumber'] = phoneNumber.trim();
+    }
+
     final response = await _apiClient.post(
       ApiConfig.loginEndpoint,
-      body: {
-        'email': email.trim(),
-        'password': password,
-      },
+      body: body,
       requiresAuth: false,
     );
 

@@ -942,6 +942,26 @@ class QrScannerScreenState extends State<QrScannerScreen>
             ),
           ),
 
+          // Medindia4u.com branding footer
+          Positioned(
+            bottom: 8,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Text(
+                'Powered by Medindia4u.com',
+                key: const Key('medindia_branding_footer_text'),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white.withValues(alpha: 0.6),
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+          ),
+
           // Loading indicator when processing scan or gallery image
           if (_isProcessing)
             Container(

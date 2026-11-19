@@ -251,7 +251,8 @@ class LocalContactRepository {
       jobTitle: contactData['jobTitle'] as String?,
       website: contactData['website'] as String?,
       address: contactData['address'] as String?,
-      personalRemark: contactData['personalRemark'] as String?,
+      personalRemark: (contactData['rememberThisContact'] as String?) ?? (contactData['personalRemark'] as String?),
+      rememberThisContact: (contactData['rememberThisContact'] as String?) ?? (contactData['personalRemark'] as String?),
       phoneNumbers: phones,
       emailAddresses: emails,
       syncStatus: isSynced ? ContactSyncStatus.synced : ContactSyncStatus.pendingCreate,
@@ -428,14 +429,24 @@ class LocalContactRepository {
       applyCorrection('email', emails.map((e) => e.email).join(', '));
     }
 
+    final hasMemoryKey = updatedData.containsKey('rememberThisContact') || updatedData.containsKey('personalRemark');
+    final memoryVal = updatedData.containsKey('rememberThisContact')
+        ? updatedData['rememberThisContact'] as String?
+        : (updatedData.containsKey('personalRemark')
+            ? updatedData['personalRemark'] as String?
+            : (existing.rememberThisContact ?? existing.personalRemark));
+    final clearMemory = hasMemoryKey && memoryVal == null;
+
     final updated = existing.copyWith(
       fullName: updatedData.containsKey('fullName') ? updatedData['fullName'] as String? : existing.fullName,
       company: updatedData.containsKey('company') ? updatedData['company'] as String? : existing.company,
       jobTitle: updatedData.containsKey('jobTitle') ? updatedData['jobTitle'] as String? : existing.jobTitle,
       website: updatedData.containsKey('website') ? updatedData['website'] as String? : existing.website,
       address: updatedData.containsKey('address') ? updatedData['address'] as String? : existing.address,
-      personalRemark: updatedData.containsKey('personalRemark') ? updatedData['personalRemark'] as String? : existing.personalRemark,
-      clearPersonalRemark: updatedData.containsKey('personalRemark') && updatedData['personalRemark'] == null,
+      personalRemark: memoryVal,
+      rememberThisContact: memoryVal,
+      clearPersonalRemark: clearMemory,
+      clearRememberThisContact: clearMemory,
       phoneNumbers: phones,
       emailAddresses: emails,
       fieldEvidence: updatedEvidence,

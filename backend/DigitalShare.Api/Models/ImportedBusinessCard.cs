@@ -40,8 +40,16 @@ public class ImportedBusinessCard
     public string? Address { get; set; }
 
     /// <summary>
+    /// Optional private personal memory/context added by the card owner (e.g. "Met at a coffee shop in Austin").
+    /// Max 2,000 characters. Strictly private to the owner user; NEVER shared in public or cross-user responses.
+    /// Searchable in My Connections.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? RememberThisContact { get; set; }
+
+    /// <summary>
     /// Optional private personal remark/nickname/note added by the card owner. Max 2,000 characters.
-    /// Strictly private to the owner user; NEVER shared in public or cross-user responses.
+    /// Kept for backward compatibility and synchronized with RememberThisContact.
     /// </summary>
     [MaxLength(2000)]
     public string? PersonalRemark { get; set; }

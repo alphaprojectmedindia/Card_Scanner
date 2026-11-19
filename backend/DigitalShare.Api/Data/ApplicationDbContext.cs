@@ -21,10 +21,14 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<MeetingRequest> MeetingRequests => Set<MeetingRequest>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<ScanJob> ScanJobs => Set<ScanJob>();
+    public DbSet<UserConsent> UserConsents => Set<UserConsent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        // Configure default MySQL character set and collation (utf8mb4 / utf8mb4_unicode_ci)
+        builder.HasCharSet("utf8mb4").UseCollation("utf8mb4_unicode_ci");
 
         builder.Entity<ApplicationUser>(entity =>
         {
@@ -84,8 +88,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasKey(c => c.Id);
             entity.HasIndex(c => c.OwnerUserId);
             entity.HasIndex(c => new { c.OwnerUserId, c.ClientRequestId })
-                .IsUnique()
-                .HasFilter("\"ClientRequestId\" IS NOT NULL");
+                .IsUnique();
 
             entity.Property(c => c.OwnerUserId).IsRequired();
             entity.Property(c => c.ClientRequestId).HasMaxLength(64);
@@ -95,6 +98,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.Property(c => c.JobTitle).HasMaxLength(100);
             entity.Property(c => c.Website).HasMaxLength(256);
             entity.Property(c => c.Address).HasMaxLength(500);
+            entity.Property(c => c.RememberThisContact).HasMaxLength(2000);
             entity.Property(c => c.PersonalRemark).HasMaxLength(2000);
             entity.Property(c => c.CreatedAtUtc).IsRequired();
             entity.Property(c => c.UpdatedAtUtc).IsRequired();
@@ -249,6 +253,28 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             entity.HasOne(j => j.User)
                 .WithMany()
                 .HasForeignKey(j => j.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<UserConsent>(entity =>
+        {
+            entity.ToTable("UserConsents");
+            entity.HasKey(c => c.Id);
+            entity.Property(c => c.UserId).IsRequired();
+            entity.Property(c => c.TermsVersion).IsRequired().HasMaxLength(50);
+            entity.Property(c => c.PrivacyPolicyVersion).IsRequired().HasMaxLength(50);
+            entity.Property(c => c.CookiePolicyVersion).IsRequired().HasMaxLength(50);
+            entity.Property(c => c.Jurisdiction).IsRequired().HasMaxLength(20);
+            entity.Property(c => c.Status).IsRequired().HasMaxLength(30);
+            entity.Property(c => c.IpAddress).HasMaxLength(100);
+            entity.Property(c => c.UserAgent).HasMaxLength(500);
+            entity.Property(c => c.ConsentTimestampUtc).IsRequired();
+
+            entity.HasIndex(c => new { c.UserId, c.ConsentTimestampUtc });
+
+            entity.HasOne(c => c.User)
+                .WithMany()
+                .HasForeignKey(c => c.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

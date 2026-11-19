@@ -121,6 +121,7 @@ public class ScanJobEntityTests
 
         Assert.NotNull(uniqueIndex);
         Assert.True(uniqueIndex.IsUnique);
-        Assert.Equal("\"ClientRequestId\" IS NOT NULL", uniqueIndex.GetFilter());
+        // In MySQL, unique indexes naturally permit multiple null values on nullable columns
+        Assert.Null(uniqueIndex.GetFilter());
     }
 }

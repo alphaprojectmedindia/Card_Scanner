@@ -945,11 +945,11 @@ void main() {
 
       expect(find.text('Home'), findsOneWidget);
       expect(find.text('Scan'), findsOneWidget);
-      expect(find.text('Connections'), findsOneWidget);
+      expect(find.text('Contacts'), findsOneWidget);
       expect(find.text('Profile'), findsOneWidget);
 
-      // Check Meetings card on Home
-      expect(find.text('Meetings'), findsOneWidget);
+      // Check Meetings card on Home (present on card and bottom nav)
+      expect(find.text('Meetings'), findsWidgets);
       expect(find.text('View requests and upcoming meetings'), findsOneWidget);
     });
   });

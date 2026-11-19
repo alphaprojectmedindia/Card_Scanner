@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'app_colors.dart';
 import 'app_spacing.dart';
 import 'app_typography.dart';
@@ -6,6 +7,22 @@ import 'app_typography.dart';
 /// Centralized Material 3 ThemeData configuration for Light and Dark modes.
 class AppTheme {
   AppTheme._();
+
+  static const SystemUiOverlayStyle lightOverlayStyle = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark,
+    statusBarBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.white,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  );
+
+  static const SystemUiOverlayStyle darkOverlayStyle = SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: Color(0xFF111827),
+    systemNavigationBarIconBrightness: Brightness.light,
+  );
 
   static ThemeData get lightTheme {
     final colorScheme = const ColorScheme.light(
@@ -41,6 +58,7 @@ class AppTheme {
         elevation: 0,
         backgroundColor: Colors.transparent,
         scrolledUnderElevation: 0,
+        systemOverlayStyle: lightOverlayStyle,
         iconTheme: IconThemeData(color: AppColors.textPrimaryLight),
         titleTextStyle: TextStyle(
           color: AppColors.textPrimaryLight,
@@ -189,6 +207,7 @@ class AppTheme {
         elevation: 0,
         backgroundColor: Colors.transparent,
         scrolledUnderElevation: 0,
+        systemOverlayStyle: darkOverlayStyle,
         iconTheme: IconThemeData(color: AppColors.textPrimaryDark),
         titleTextStyle: TextStyle(
           color: AppColors.textPrimaryDark,

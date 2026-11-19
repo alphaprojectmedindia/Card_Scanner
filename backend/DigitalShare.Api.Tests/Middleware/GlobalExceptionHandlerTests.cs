@@ -195,7 +195,7 @@ public class GlobalExceptionHandlerTests : IClassFixture<CustomWebApplicationFac
         public Task<ImportedContactResponse> SaveContactAsync(string ownerUserId, SaveImportedContactRequest request, string? clientRequestId)
             => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
 
-        public Task<IEnumerable<ImportedContactResponse>> GetContactsAsync(string ownerUserId)
+        public Task<IEnumerable<ImportedContactResponse>> GetContactsAsync(string ownerUserId, string? search = null)
             => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
 
         public Task<ImportedContactResponse?> GetContactByIdAsync(string ownerUserId, Guid id)
@@ -207,10 +207,19 @@ public class GlobalExceptionHandlerTests : IClassFixture<CustomWebApplicationFac
         public Task<bool> DeleteContactAsync(string ownerUserId, Guid id)
             => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
 
+        public Task<UnifiedContactsPagedResponse> GetUnifiedContactsAsync(string ownerUserId, string? search = null, string? source = null, int page = 1, int pageSize = 50)
+            => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
+
         public Task<ImportedContactResponse?> UpdateRemarkAsync(string ownerUserId, Guid id, string? remark)
             => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
 
         public Task<ImportedContactResponse?> ClearRemarkAsync(string ownerUserId, Guid id)
+            => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
+
+        public Task<ImportedContactResponse?> UpdateMemoryAsync(string ownerUserId, Guid id, string? memory)
+            => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
+
+        public Task<ImportedContactResponse?> ClearMemoryAsync(string ownerUserId, Guid id)
             => throw new InvalidOperationException("DB Failure: Server=prod-db;Password=SECRET_DB_PASSWORD_XYZ;");
     }
 

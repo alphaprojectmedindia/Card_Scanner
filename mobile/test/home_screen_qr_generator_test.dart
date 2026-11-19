@@ -108,7 +108,7 @@ void main() {
       final qrScanCenter = tester.getCenter(find.text('Universal QR Scanner'));
       final digitalCardCenter = tester.getCenter(find.text('My Digital Card'));
       final qrGenCenter = tester.getCenter(find.text('QR Generator'));
-      final meetingsCenter = tester.getCenter(find.text('Meetings'));
+      final meetingsCenter = tester.getCenter(find.text('Meetings').first);
 
       // Vertical ordering strictly verified:
       expect(bCardCenter.dy < qrScanCenter.dy, isTrue,

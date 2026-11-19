@@ -93,12 +93,16 @@ public class ImportedContactsController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieve all imported business cards saved by the authenticated user, newest first.
+    /// Retrieve unified contacts combining Business Cards and QR Code Scans/Connections with searching and pagination.
     /// </summary>
-    [HttpGet]
-    [ProducesResponseType(typeof(IEnumerable<ImportedContactResponse>), StatusCodes.Status200OK)]
+    [HttpGet("unified")]
+    [ProducesResponseType(typeof(UnifiedContactsPagedResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> GetContacts()
+    public async Task<IActionResult> GetUnifiedContacts(
+        [FromQuery] string? search = null,
+        [FromQuery] string? source = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
         var userId = GetCurrentUserId();
         if (string.IsNullOrEmpty(userId))
@@ -106,7 +110,26 @@ public class ImportedContactsController : ControllerBase
             return Unauthorized(new ErrorResponse("Unauthorized user context."));
         }
 
-        var contacts = await _importedContactService.GetContactsAsync(userId);
+        var result = await _importedContactService.GetUnifiedContactsAsync(userId, search, source, page, pageSize);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Retrieve all imported business cards saved by the authenticated user, newest first.
+    /// Supports optional search filtering across name, company, job title, address, memory, phones, and emails.
+    /// </summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(IEnumerable<ImportedContactResponse>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetContacts([FromQuery] string? search = null)
+    {
+        var userId = GetCurrentUserId();
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        var contacts = await _importedContactService.GetContactsAsync(userId, search);
         return Ok(contacts);
     }
 
@@ -174,6 +197,62 @@ public class ImportedContactsController : ControllerBase
     }
 
     /// <summary>
+    /// Update or add a private personal memory (Remember This Contact) on an imported business card.
+    /// Strictly authorized: only the owner can modify their memory.
+    /// </summary>
+    [HttpPut("{id:guid}/memory")]
+    [ProducesResponseType(typeof(ImportedContactResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UpdateMemory(Guid id, [FromBody] UpdateContactRemarkRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var memory = request.RememberThisContact ?? request.Remark;
+        var updated = await _importedContactService.UpdateMemoryAsync(userId, id, memory);
+        if (updated == null)
+        {
+            return NotFound(new ErrorResponse("Imported business card not found."));
+        }
+
+        return Ok(updated);
+    }
+
+    /// <summary>
+    /// Clear a private personal memory from an imported business card.
+    /// </summary>
+    [HttpDelete("{id:guid}/memory")]
+    [ProducesResponseType(typeof(ImportedContactResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ClearMemory(Guid id)
+    {
+        var userId = GetCurrentUserId();
+        if (string.IsNullOrEmpty(userId))
+        {
+            return Unauthorized(new ErrorResponse("Unauthorized user context."));
+        }
+
+        var updated = await _importedContactService.ClearMemoryAsync(userId, id);
+        if (updated == null)
+        {
+            return NotFound(new ErrorResponse("Imported business card not found."));
+        }
+
+        return Ok(updated);
+    }
+
+    /// <summary>
     /// Update or add a private personal remark on an imported business card.
     /// Strictly authorized: only the owner can modify their remark.
     /// </summary>
@@ -195,7 +274,8 @@ public class ImportedContactsController : ControllerBase
             return BadRequest(ModelState);
         }
 
-        var updated = await _importedContactService.UpdateRemarkAsync(userId, id, request.Remark);
+        var memory = request.RememberThisContact ?? request.Remark;
+        var updated = await _importedContactService.UpdateRemarkAsync(userId, id, memory);
         if (updated == null)
         {
             return NotFound(new ErrorResponse("Imported business card not found."));

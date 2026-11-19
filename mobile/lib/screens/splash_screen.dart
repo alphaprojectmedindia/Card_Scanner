@@ -118,7 +118,18 @@ class _SplashScreenState extends State<SplashScreen> {
                 color: theme.colorScheme.primary,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
+            Text(
+              'Powered by Medindia4u.com',
+              key: const Key('splash_medindia_branding_text'),
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: theme.colorScheme.primary.withValues(alpha: 0.85),
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 20),
             Text(
               'Digital Share',
               style: theme.textTheme.headlineMedium?.copyWith(

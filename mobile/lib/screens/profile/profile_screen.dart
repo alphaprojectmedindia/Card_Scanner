@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../config/api_config.dart';
+import '../../config/legal_urls.dart';
 import '../../models/user_profile.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
@@ -13,12 +14,15 @@ import '../../theme/theme_controller.dart';
 import '../../widgets/digital_share_logo.dart';
 import '../../widgets/theme_selection_dialog.dart';
 import '../auth/login_screen.dart';
+import '../legal/legal_documents_screen.dart';
 import '../meetings/meetings_screen.dart';
 import 'availability_settings_screen.dart';
 import 'digital_card_screen.dart';
 import 'edit_profile_screen.dart';
-import 'account_visibility_screen.dart';
 import 'delete_account_screen.dart';
+import '../../services/onboarding_tutorial_service.dart';
+import '../../services/secure_storage_service.dart';
+import '../../widgets/medindia_branding_footer.dart';
 
 class ProfileScreen extends StatefulWidget {
   final UserProfile? initialProfile;
@@ -849,38 +853,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                                     );
                                   },
                                 ),
-                                const Divider(height: 1),
-                                ListTile(
-                                  key: const Key('account_visibility_tile'),
-                                  leading: Container(
-                                    padding: const EdgeInsets.all(8),
-                                    decoration: BoxDecoration(
-                                      color: theme.colorScheme.primaryContainer,
-                                      borderRadius: AppSpacing.radiusSm,
-                                    ),
-                                    child: Icon(
-                                      Icons.visibility_outlined,
-                                      color: theme.colorScheme.primary,
-                                      size: 20,
-                                    ),
-                                  ),
-                                  title: const Text(
-                                    'Account Visibility',
-                                    style: TextStyle(fontWeight: FontWeight.w600),
-                                  ),
-                                  subtitle: const Text('Public vs Private discovery settings'),
-                                  trailing: const Icon(Icons.chevron_right_rounded),
-                                  onTap: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(
-                                        builder: (_) => AccountVisibilityScreen(
-                                          profileService: _profileService,
-                                          initialIsPublic: _profile?.isPublic,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
+
                                 const Divider(height: 1),
                                 ListTile(
                                   key: const Key('delete_account_tile'),
@@ -909,6 +882,91 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                                     Navigator.of(context).push(
                                       MaterialPageRoute(
                                         builder: (_) => const DeleteAccountScreen(),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const Divider(height: 1),
+                                ListTile(
+                                  key: const Key('profile_replay_tutorial_tile'),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.primaryContainer,
+                                      borderRadius: AppSpacing.radiusSm,
+                                    ),
+                                    child: Icon(
+                                      Icons.explore_outlined,
+                                      color: theme.colorScheme.primary,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'Interactive Onboarding Tour',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  subtitle: const Text('Replay the complete guided application walkthrough'),
+                                  trailing: const Icon(Icons.chevron_right_rounded),
+                                  onTap: () async {
+                                    final userId = _profile?.id ??
+                                        await SecureStorageService().getUserId();
+                                    await OnboardingTutorialService.instance
+                                        .resetTutorial(userId);
+                                    OnboardingTutorialService.instance.requestTourStart();
+                                    if (!context.mounted) return;
+                                    Navigator.of(context).pop({'startTour': true});
+                                  },
+                                ),
+                                const Divider(height: 1),
+                                ListTile(
+                                  key: const Key('profile_privacy_centre_tile'),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.primaryContainer,
+                                      borderRadius: AppSpacing.radiusSm,
+                                    ),
+                                    child: Icon(
+                                      Icons.shield_outlined,
+                                      color: theme.colorScheme.primary,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'Privacy Centre',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  subtitle: const Text('Manage your privacy and learn how your data is used.'),
+                                  trailing: const Icon(Icons.chevron_right_rounded),
+                                  onTap: () async {
+                                    await LegalUrls.openPrivacyCentre();
+                                  },
+                                ),
+                                const Divider(height: 1),
+                                ListTile(
+                                  key: const Key('profile_legal_privacy_tile'),
+                                  leading: Container(
+                                    padding: const EdgeInsets.all(8),
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.secondaryContainer,
+                                      borderRadius: AppSpacing.radiusSm,
+                                    ),
+                                    child: Icon(
+                                      Icons.policy_outlined,
+                                      color: theme.colorScheme.secondary,
+                                      size: 20,
+                                    ),
+                                  ),
+                                  title: const Text(
+                                    'Terms & Privacy Policy',
+                                    style: TextStyle(fontWeight: FontWeight.w600),
+                                  ),
+                                  subtitle: const Text('DPDP Act, GDPR, and jurisdictional legal notices'),
+                                  trailing: const Icon(Icons.chevron_right_rounded),
+                                  onTap: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const LegalDocumentsScreen(),
                                       ),
                                     );
                                   },
@@ -969,6 +1027,8 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                               ],
                             ),
                           ),
+                          const SizedBox(height: AppSpacing.md),
+                          const MedindiaBrandingFooter(showDivider: true),
                           const SizedBox(height: AppSpacing.xxxl),
                         ],
                       ),

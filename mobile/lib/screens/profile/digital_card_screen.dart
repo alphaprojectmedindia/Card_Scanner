@@ -5,6 +5,7 @@ import '../../models/user_profile.dart';
 import '../../services/api_client.dart';
 import '../../services/auth_service.dart';
 import '../../services/profile_service.dart';
+import '../../widgets/medindia_branding_footer.dart';
 import '../auth/login_screen.dart';
 
 class DigitalCardScreen extends StatefulWidget {
@@ -338,6 +339,8 @@ class _DigitalCardScreenState extends State<DigitalCardScreen> {
                             ),
                           ),
                         ),
+                        const SizedBox(height: 16),
+                        const MedindiaBrandingFooter(showDivider: true),
                       ],
                     ),
                   ),

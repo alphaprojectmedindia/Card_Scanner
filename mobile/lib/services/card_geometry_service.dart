@@ -1,7 +1,80 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' show Rect, Offset, Size;
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+
+/// Dedicated state machine tracking the business card lifecycle from search to capture and perspective correction.
+enum CardDetectionState {
+  searching,
+  detected,
+  tracking,
+  stabilizing,
+  capturing,
+  processing,
+  completed,
+}
+
+/// Bidirectional coordinate mapper between camera sensor / preview coordinates [0.0, 1.0]
+/// and screen pixel coordinates, compensating for [BoxFit.cover] aspect ratio scaling and centering offsets.
+class CameraCoordinateMapper {
+  final Size screenSize;
+  final double previewAspect; // width / height of upright portrait preview (e.g. 9/16 = 0.5625)
+
+  const CameraCoordinateMapper({
+    required this.screenSize,
+    required this.previewAspect,
+  });
+
+  double get _screenAspect =>
+      screenSize.width / (screenSize.height > 0 ? screenSize.height : 1.0);
+
+  /// Converts a point in normalized camera preview space [0.0, 1.0] to screen pixel space.
+  Offset cameraToScreen(Offset camNormalized) {
+    if (screenSize.width <= 0 || screenSize.height <= 0 || previewAspect <= 0) {
+      return Offset(
+        camNormalized.dx * screenSize.width,
+        camNormalized.dy * screenSize.height,
+      );
+    }
+    double scaledW, scaledH, offsetX = 0.0, offsetY = 0.0;
+    if (_screenAspect > previewAspect) {
+      scaledW = screenSize.width;
+      scaledH = screenSize.width / previewAspect;
+      offsetY = (scaledH - screenSize.height) / 2.0;
+    } else {
+      scaledH = screenSize.height;
+      scaledW = screenSize.height * previewAspect;
+      offsetX = (scaledW - screenSize.width) / 2.0;
+    }
+    final sx = camNormalized.dx * scaledW - offsetX;
+    final sy = camNormalized.dy * scaledH - offsetY;
+    return Offset(sx, sy);
+  }
+
+  /// Converts a point in screen pixel space to normalized camera preview space [0.0, 1.0].
+  Offset screenToCamera(Offset screenPixel) {
+    if (screenSize.width <= 0 || screenSize.height <= 0 || previewAspect <= 0) {
+      return Offset(
+        (screenPixel.dx / screenSize.width).clamp(0.0, 1.0),
+        (screenPixel.dy / screenSize.height).clamp(0.0, 1.0),
+      );
+    }
+    double scaledW, scaledH, offsetX = 0.0, offsetY = 0.0;
+    if (_screenAspect > previewAspect) {
+      scaledW = screenSize.width;
+      scaledH = screenSize.width / previewAspect;
+      offsetY = (scaledH - screenSize.height) / 2.0;
+    } else {
+      scaledH = screenSize.height;
+      scaledW = screenSize.height * previewAspect;
+      offsetX = (scaledW - screenSize.width) / 2.0;
+    }
+    final cx = (screenPixel.dx + offsetX) / scaledW;
+    final cy = (screenPixel.dy + offsetY) / scaledH;
+    return Offset(cx.clamp(0.0, 1.0), cy.clamp(0.0, 1.0));
+  }
+}
 
 /// Representation of 4 detected quadrilateral corners on a card image.
 class CardCorners {
@@ -23,6 +96,154 @@ class CardCorners {
         'bottomLeft': {'x': bottomLeft.x, 'y': bottomLeft.y},
         'bottomRight': {'x': bottomRight.x, 'y': bottomRight.y},
       };
+
+  /// Returns 4 polygon points ordered clockwise: [topLeft, topRight, bottomRight, bottomLeft].
+  List<Point<int>> toPolygonPoints() => [topLeft, topRight, bottomRight, bottomLeft];
+
+  /// Returns 4 normalized polygon vertices [Offset(x, y)] in 0.0 to 1.0 coordinate space.
+  List<Offset> toNormalizedPolygon(int width, int height) {
+    final w = max(1, width).toDouble();
+    final h = max(1, height).toDouble();
+    return [
+      Offset((topLeft.x / w).clamp(0.0, 1.0), (topLeft.y / h).clamp(0.0, 1.0)),
+      Offset((topRight.x / w).clamp(0.0, 1.0), (topRight.y / h).clamp(0.0, 1.0)),
+      Offset((bottomRight.x / w).clamp(0.0, 1.0), (bottomRight.y / h).clamp(0.0, 1.0)),
+      Offset((bottomLeft.x / w).clamp(0.0, 1.0), (bottomLeft.y / h).clamp(0.0, 1.0)),
+    ];
+  }
+
+  static double _dist(Point<int> p1, Point<int> p2) {
+    final dx = (p1.x - p2.x).toDouble();
+    final dy = (p1.y - p2.y).toDouble();
+    return sqrt(dx * dx + dy * dy);
+  }
+
+  double get widthTop => _dist(topLeft, topRight);
+  double get widthBottom => _dist(bottomLeft, bottomRight);
+  double get heightLeft => _dist(topLeft, bottomLeft);
+  double get heightRight => _dist(topRight, bottomRight);
+
+  double get avgWidth => (widthTop + widthBottom) / 2.0;
+  double get avgHeight => (heightLeft + heightRight) / 2.0;
+  double get aspectRatio => avgHeight > 0 ? (avgWidth / avgHeight) : 1.0;
+
+  bool get isSquare => aspectRatio >= 0.82 && aspectRatio <= 1.20;
+  bool get isLandscape => aspectRatio >= 1.20 && aspectRatio <= 2.30;
+  bool get isPortrait => aspectRatio >= 0.40 && aspectRatio < 0.82;
+
+  /// Area calculated using Shoelace formula for quadrilateral
+  double get area {
+    final x0 = topLeft.x.toDouble(), y0 = topLeft.y.toDouble();
+    final x1 = topRight.x.toDouble(), y1 = topRight.y.toDouble();
+    final x2 = bottomRight.x.toDouble(), y2 = bottomRight.y.toDouble();
+    final x3 = bottomLeft.x.toDouble(), y3 = bottomLeft.y.toDouble();
+    return 0.5 *
+        ((x0 * y1 + x1 * y2 + x2 * y3 + x3 * y0) -
+                (y0 * x1 + y1 * x2 + y2 * x3 + y3 * x0))
+            .abs();
+  }
+
+  /// Verifies that the quadrilateral is strictly convex (non-self-intersecting).
+  bool get isConvex {
+    final pts = [topLeft, topRight, bottomRight, bottomLeft];
+    bool? sign;
+    for (int i = 0; i < 4; i++) {
+      final p1 = pts[i];
+      final p2 = pts[(i + 1) % 4];
+      final p3 = pts[(i + 2) % 4];
+      final dx1 = p2.x - p1.x;
+      final dy1 = p2.y - p1.y;
+      final dx2 = p3.x - p2.x;
+      final dy2 = p3.y - p2.y;
+      final cross = dx1 * dy2 - dy1 * dx2;
+      if (cross == 0) return false;
+      if (sign == null) {
+        sign = cross > 0;
+      } else if ((cross > 0) != sign) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Returns internal angle in degrees at corner index: 0 = TL, 1 = TR, 2 = BR, 3 = BL.
+  double cornerAngle(int cornerIndex) {
+    Point<int> pCenter;
+    Point<int> pA;
+    Point<int> pB;
+
+    switch (cornerIndex % 4) {
+      case 0: // Top-Left
+        pCenter = topLeft;
+        pA = topRight;
+        pB = bottomLeft;
+        break;
+      case 1: // Top-Right
+        pCenter = topRight;
+        pA = bottomRight;
+        pB = topLeft;
+        break;
+      case 2: // Bottom-Right
+        pCenter = bottomRight;
+        pA = bottomLeft;
+        pB = topRight;
+        break;
+      case 3: // Bottom-Left
+      default:
+        pCenter = bottomLeft;
+        pA = topLeft;
+        pB = bottomRight;
+        break;
+    }
+
+    final v1x = (pA.x - pCenter.x).toDouble();
+    final v1y = (pA.y - pCenter.y).toDouble();
+    final v2x = (pB.x - pCenter.x).toDouble();
+    final v2y = (pB.y - pCenter.y).toDouble();
+
+    final mag1 = sqrt(v1x * v1x + v1y * v1y);
+    final mag2 = sqrt(v2x * v2x + v2y * v2y);
+    if (mag1 == 0 || mag2 == 0) return 90.0;
+
+    final dot = (v1x * v2x + v1y * v2y) / (mag1 * mag2);
+    final rad = acos(dot.clamp(-1.0, 1.0));
+    return rad * 180.0 / pi;
+  }
+
+  /// Verifies all four interior angles are within document perspective range [minAngleDeg, maxAngleDeg].
+  bool hasValidCornerAngles({double minAngleDeg = 55.0, double maxAngleDeg = 125.0}) {
+    for (int i = 0; i < 4; i++) {
+      final a = cornerAngle(i);
+      if (a < minAngleDeg || a > maxAngleDeg) return false;
+    }
+    return true;
+  }
+
+  /// Angle quality score (1.0 = ideal 90° corners, degrades as quadrilateral skews).
+  double get angularScore {
+    double totalDev = 0.0;
+    for (int i = 0; i < 4; i++) {
+      totalDev += (cornerAngle(i) - 90.0).abs();
+    }
+    final meanDev = totalDev / 4.0;
+    return max(0.0, 1.0 - (meanDev / 45.0));
+  }
+
+  /// Edge parallelism / consistency ratio between opposite pairs of sides (0.0 to 1.0).
+  double get edgeConsistency {
+    final wMax = max(widthTop, widthBottom);
+    final wRatio = wMax > 0 ? (min(widthTop, widthBottom) / wMax) : 0.0;
+    final hMax = max(heightLeft, heightRight);
+    final hRatio = hMax > 0 ? (min(heightLeft, heightRight) / hMax) : 0.0;
+    return (wRatio + hRatio) / 2.0;
+  }
+
+  /// Rectangularity score: card quadrilateral area compared to average width * height.
+  double get rectangularityScore {
+    final expectedArea = avgWidth * avgHeight;
+    if (expectedArea <= 0) return 0.0;
+    return (min(area, expectedArea) / max(area, expectedArea)).clamp(0.0, 1.0);
+  }
 
   /// Tests whether point (x, y) is inside the bounding rectangle formed by the corners.
   bool containsPoint(num x, num y) {
@@ -163,6 +384,104 @@ class CardGeometryResult {
       );
 }
 
+/// Structured real-time business card detection result from camera frame analysis.
+class BusinessCardDetectionResult {
+  /// True if an actual business card with valid boundaries, aspect ratio,
+  /// edge contrast, and interior content was detected.
+  final bool isDetected;
+
+  /// Detection state machine status.
+  final CardDetectionState state;
+
+  /// Quadrilateral corners in coordinate space of the analyzed image.
+  final CardCorners? corners;
+
+  /// Normalized 4-corner polygon [Offset(x, y)] in 0.0 to 1.0 coordinate space for live overlay.
+  final List<Offset>? normalizedPolygon;
+
+  /// Normalized bounding box (0.0 to 1.0) of the detected card relative to the preview frame.
+  final Rect? normalizedBoundingBox;
+
+  /// Geometric confidence score (0.0 to 1.0).
+  final double confidence;
+
+  /// Aspect ratio (width / height).
+  final double aspectRatio;
+
+  /// True if card is oriented in landscape format.
+  final bool isLandscape;
+
+  /// True if card has square or near-square proportions.
+  final bool isSquare;
+
+  /// True if card is oriented in vertical/portrait format.
+  bool get isPortrait => !isLandscape && !isSquare;
+
+  /// Measured contrast gradient across the card perimeter against background.
+  final double edgeContrast;
+
+  /// Interior texture/glyph variance (distinguishes printed cards from blank paper or monotone objects).
+  final double interiorTextureVariance;
+
+  /// True if the interior of the detected shape contains text, typography, or high-frequency details.
+  final bool hasCardContent;
+
+  /// Ratio of card quadrilateral area to total camera frame area (0.0 to 1.0).
+  final double cardAreaRatio;
+
+  /// Internal angular quality score (1.0 = ideal 90° corners).
+  final double angularScore;
+
+  /// Rectangularity score (0.0 to 1.0).
+  final double rectangularityScore;
+
+  /// Capture quality indicators (brightness, blur, clipping).
+  final CaptureQualityAssessment quality;
+
+  const BusinessCardDetectionResult({
+    required this.isDetected,
+    this.state = CardDetectionState.searching,
+    this.corners,
+    this.normalizedPolygon,
+    this.normalizedBoundingBox,
+    this.confidence = 0.0,
+    this.aspectRatio = 0.0,
+    this.isLandscape = true,
+    this.isSquare = false,
+    this.edgeContrast = 0.0,
+    this.interiorTextureVariance = 0.0,
+    this.hasCardContent = false,
+    this.cardAreaRatio = 0.0,
+    this.angularScore = 0.0,
+    this.rectangularityScore = 0.0,
+    required this.quality,
+  });
+
+  factory BusinessCardDetectionResult.none({
+    CaptureQualityAssessment? quality,
+    CardDetectionState state = CardDetectionState.searching,
+  }) =>
+      BusinessCardDetectionResult(
+        isDetected: false,
+        state: state,
+        quality: quality ??
+            const CaptureQualityAssessment(
+              brightness: 128.0,
+              isExtremelyDark: false,
+              isExtremelyOverexposed: false,
+              blurScore: 100.0,
+              isBlurry: false,
+              cardAreaRatio: 0.0,
+              isTooSmall: false,
+              isTooClose: false,
+              isClipping: false,
+              isSeverePerspective: false,
+              isUsableResolution: true,
+              guidanceMessage: 'Position card inside the frame',
+            ),
+      );
+}
+
 /// Service that safely detects business card boundaries and performs perspective
 /// correction before OCR when geometric confidence is high.
 /// Falls back to the viewfinder safe ROI crop (or upright image) whenever confidence is insufficient.
@@ -175,10 +494,12 @@ class CardGeometryService {
   });
 
   /// Evaluates and corrects perspective for an image at [imagePath].
+  /// Maps detected corners to exact destination dimensions without distortion or background.
   /// Never mutates the original image file.
   Future<CardGeometryResult> correctPerspectiveIfReliable(
     String imagePath, [
     ViewfinderNormalizedRect? viewfinderRoi,
+    List<Offset>? detectedNormalizedPolygon,
   ]) async {
     try {
       final file = File(imagePath);
@@ -197,15 +518,45 @@ class CardGeometryService {
       final bool hadExifOrientation = orientation != 1;
       final uprightImage = img.bakeOrientation(original);
 
-      // 2. Detect 4 card corners
-      final detection = detectCorners(uprightImage, viewfinderRoi: viewfinderRoi);
+      // 2. Map corners or detect on uprightImage
+      CardCorners? corners;
+      double cornerConfidence = 0.0;
+
+      // 2a. If high-res edge detection finds prominent card corners, prioritize them
+      final detection = detectCorners(uprightImage, viewfinderRoi: viewfinderRoi, allowSquare: true);
+      if (detection.corners != null && detection.confidence >= 0.65) {
+        corners = detection.corners;
+        cornerConfidence = detection.confidence;
+      }
+
+      // 2b. If not detected at full-res, use mapped corners from real-time live preview
+      if (corners == null && detectedNormalizedPolygon != null && detectedNormalizedPolygon.length == 4) {
+        final p0 = detectedNormalizedPolygon[0];
+        final p1 = detectedNormalizedPolygon[1];
+        final p2 = detectedNormalizedPolygon[2];
+        final p3 = detectedNormalizedPolygon[3];
+        corners = CardCorners(
+          topLeft: Point<int>((p0.dx * uprightImage.width).round().clamp(0, uprightImage.width - 1), (p0.dy * uprightImage.height).round().clamp(0, uprightImage.height - 1)),
+          topRight: Point<int>((p1.dx * uprightImage.width).round().clamp(0, uprightImage.width - 1), (p1.dy * uprightImage.height).round().clamp(0, uprightImage.height - 1)),
+          bottomRight: Point<int>((p2.dx * uprightImage.width).round().clamp(0, uprightImage.width - 1), (p2.dy * uprightImage.height).round().clamp(0, uprightImage.height - 1)),
+          bottomLeft: Point<int>((p3.dx * uprightImage.width).round().clamp(0, uprightImage.width - 1), (p3.dy * uprightImage.height).round().clamp(0, uprightImage.height - 1)),
+        );
+        cornerConfidence = 0.82;
+      }
+
+      // 2c. Fallback to detection corners if available
+      if (corners == null && detection.corners != null) {
+        corners = detection.corners;
+        cornerConfidence = detection.confidence;
+      }
+
       final quality = assessCaptureQuality(
         uprightImage,
-        corners: detection.corners,
-        confidence: detection.confidence,
+        corners: corners,
+        confidence: cornerConfidence,
       );
 
-      if (detection.confidence < minConfidenceThreshold || detection.corners == null) {
+      if (cornerConfidence < minConfidenceThreshold || corners == null) {
         // Edge detection confidence is insufficient -> use safe viewfinder ROI crop if available
         if (viewfinderRoi != null && viewfinderRoi.width > 0.1 && viewfinderRoi.height > 0.1) {
           final marginX = (uprightImage.width * 0.03).round();
@@ -237,7 +588,7 @@ class CardGeometryService {
               imagePath: tempFile.path,
               wasCorrected: false,
               wasRoiCropped: true,
-              confidence: detection.confidence,
+              confidence: cornerConfidence,
               temporaryFilePath: tempFile.path,
               quality: quality,
             );
@@ -254,7 +605,7 @@ class CardGeometryService {
             imagePath: tempFile.path,
             wasCorrected: false,
             wasRoiCropped: false,
-            confidence: detection.confidence,
+            confidence: cornerConfidence,
             temporaryFilePath: tempFile.path,
             quality: quality,
           );
@@ -263,23 +614,46 @@ class CardGeometryService {
           imagePath: imagePath,
           wasCorrected: false,
           wasRoiCropped: false,
-          confidence: detection.confidence,
+          confidence: cornerConfidence,
           quality: quality,
         );
       }
 
-      final corners = detection.corners!;
+      // 3. Perform perspective rectification mapped to exact card dimensions
+      final widthTop = _distance(corners.topLeft, corners.topRight);
+      final widthBottom = _distance(corners.bottomLeft, corners.bottomRight);
+      final heightLeft = _distance(corners.topLeft, corners.bottomLeft);
+      final heightRight = _distance(corners.topRight, corners.bottomRight);
 
-      // 3. Perform rectification via copyRectify
-      var rectified = img.copyRectify(
-        uprightImage,
-        topLeft: img.Point(corners.topLeft.x, corners.topLeft.y),
-        topRight: img.Point(corners.topRight.x, corners.topRight.y),
-        bottomLeft: img.Point(corners.bottomLeft.x, corners.bottomLeft.y),
-        bottomRight: img.Point(corners.bottomRight.x, corners.bottomRight.y),
+      final targetW = max(widthTop, widthBottom).round().clamp(350, 3600);
+      final targetH = max(heightLeft, heightRight).round().clamp(250, 3600);
+
+      final destImage = img.Image(
+        width: targetW,
+        height: targetH,
+        numChannels: uprightImage.numChannels,
       );
 
-      // Controlled upscale if rectified card is small (Requirement 6: Small text preservation)
+      // Radial outward expansion (~1.8%) around quadrilateral centroid
+      // to preserve rounded corners, bleed edges, and outer border artwork
+      final centroidX = (corners.topLeft.x + corners.topRight.x + corners.bottomLeft.x + corners.bottomRight.x) / 4.0;
+      final centroidY = (corners.topLeft.y + corners.topRight.y + corners.bottomLeft.y + corners.bottomRight.y) / 4.0;
+      const expandFactor = 1.018;
+
+      int expX(int x) => (centroidX + (x - centroidX) * expandFactor).round().clamp(0, uprightImage.width - 1);
+      int expY(int y) => (centroidY + (y - centroidY) * expandFactor).round().clamp(0, uprightImage.height - 1);
+
+      var rectified = img.copyRectify(
+        uprightImage,
+        topLeft: img.Point(expX(corners.topLeft.x), expY(corners.topLeft.y)),
+        topRight: img.Point(expX(corners.topRight.x), expY(corners.topRight.y)),
+        bottomLeft: img.Point(expX(corners.bottomLeft.x), expY(corners.bottomLeft.y)),
+        bottomRight: img.Point(expX(corners.bottomRight.x), expY(corners.bottomRight.y)),
+        interpolation: img.Interpolation.linear,
+        toImage: destImage,
+      );
+
+      // Controlled upscale if rectified card is small for crisp OCR reading
       final rectLongEdge = max(rectified.width, rectified.height);
       if (rectLongEdge < 1200) {
         final double scale = (1200 / rectLongEdge).clamp(1.1, 1.8);
@@ -290,6 +664,9 @@ class CardGeometryService {
           interpolation: img.Interpolation.linear,
         );
       }
+
+      // Requirement 4: Image enhancement & lighting correction without color distortion
+      rectified = _applyGentleLightingCorrection(rectified);
 
       // 4. Save corrected image to temporary cache file
       final tempDir = Directory.systemTemp.path;
@@ -303,7 +680,7 @@ class CardGeometryService {
         imagePath: tempFile.path,
         wasCorrected: true,
         wasRoiCropped: false,
-        confidence: detection.confidence,
+        confidence: cornerConfidence,
         corners: corners,
         temporaryFilePath: tempFile.path,
         quality: quality,
@@ -347,8 +724,9 @@ class CardGeometryService {
 
     final avgBrightness = totalLum / totalPixels;
     final isExtremelyDark = avgBrightness < 45.0;
+    // Overexposure / glare occurs when average luminance is extreme (>238) or over 65% of frame is saturated white
     final isExtremelyOverexposed =
-        avgBrightness > 220.0 || (saturatedCount / totalPixels > 0.25);
+        avgBrightness > 238.0 || (saturatedCount / totalPixels > 0.65);
 
     // Compute blur via Laplacian variance on central region at native resolution
     final cropW = min(400, origW);
@@ -463,9 +841,11 @@ class CardGeometryService {
   }
 
   /// Detects 4 corner candidates on an in-memory [img.Image] and evaluates geometric confidence.
+  /// Supports both rectangular (landscape & portrait) and square-shaped business cards.
   ({CardCorners? corners, double confidence}) detectCorners(
     img.Image image, {
     ViewfinderNormalizedRect? viewfinderRoi,
+    bool allowSquare = true,
   }) {
     final origW = image.width;
     final origH = image.height;
@@ -479,12 +859,29 @@ class CardGeometryService {
     // Compute Sobel edges
     final edgeImage = _computeSobelEdges(gray);
 
-    // Find bounding contour / extremal points of significant edges
-    final points = <Point<int>>[];
-    final threshold = 45; // gradient threshold
+    // Filter candidate points: discard edge points touching the camera frame boundary (outer 2.5%)
+    // to reject table edges, wood grain running off-screen, and background artifacts.
+    final borderX = max(2, (scaleW * 0.025).round());
+    final borderY = max(2, (scaleH * 0.025).round());
 
-    for (int y = 0; y < edgeImage.height; y++) {
-      for (int x = 0; x < edgeImage.width; x++) {
+    // 1. Determine peak edge magnitude across scene
+    int maxMag = 0;
+    for (int y = borderY; y < edgeImage.height - borderY; y++) {
+      for (int x = borderX; x < edgeImage.width - borderX; x++) {
+        final mag = edgeImage.getPixel(x, y).r.toInt();
+        if (mag > maxMag) maxMag = mag;
+      }
+    }
+
+    // 2. Adaptive edge thresholding:
+    // Business card perimeters exhibit the most prominent gradient in the frame.
+    // Scales adaptively between 32 (for subtle white cards on light tables) and ~42% of peak magnitude
+    // (filtering out soft wooden table grain, shadows, and fabric textures).
+    final threshold = max(32, (maxMag * 0.42).round());
+
+    final points = <Point<int>>[];
+    for (int y = borderY; y < edgeImage.height - borderY; y++) {
+      for (int x = borderX; x < edgeImage.width - borderX; x++) {
         if (edgeImage.getPixel(x, y).r > threshold) {
           points.add(Point(x, y));
         }
@@ -495,6 +892,75 @@ class CardGeometryService {
       return (corners: null, confidence: 0.1);
     }
 
+    // Candidate 1: Contour extraction and Ramer-Douglas-Peucker (RDP) polygon approximation
+    CardCorners? bestContourCorners;
+    double bestContourScore = 0.0;
+
+    final candidateContours = _findCandidateContours(edgeImage, threshold, borderX, borderY);
+    for (final contour in candidateContours) {
+      if (contour.length < 24) continue;
+      final perim = _calculatePerimeter(contour);
+      final eps = perim * 0.038;
+      var approx = _approximatePolygonRDP(contour, eps);
+      if (approx.length == 5 && approx.first == approx.last) {
+        approx = approx.sublist(0, 4);
+      }
+      if (approx.length == 4) {
+        final ordered = _orderVerticesClockwise(approx);
+        final factorX = origW / scaleW;
+        final factorY = origH / scaleH;
+        final marginX = (origW * 0.02).round();
+        final marginY = (origH * 0.02).round();
+
+        final cTL = Point<int>(
+          max(0, (ordered[0].x * factorX).round() - marginX),
+          max(0, (ordered[0].y * factorY).round() - marginY),
+        );
+        final cTR = Point<int>(
+          min(origW - 1, (ordered[1].x * factorX).round() + marginX),
+          max(0, (ordered[1].y * factorY).round() - marginY),
+        );
+        final cBR = Point<int>(
+          min(origW - 1, (ordered[2].x * factorX).round() + marginX),
+          min(origH - 1, (ordered[2].y * factorY).round() + marginY),
+        );
+        final cBL = Point<int>(
+          max(0, (ordered[3].x * factorX).round() - marginX),
+          min(origH - 1, (ordered[3].y * factorY).round() + marginY),
+        );
+
+        final cand = CardCorners(
+          topLeft: cTL,
+          topRight: cTR,
+          bottomLeft: cBL,
+          bottomRight: cBR,
+        );
+
+        if (cand.isConvex && cand.hasValidCornerAngles(minAngleDeg: 55.0, maxAngleDeg: 125.0)) {
+          final candArea = cand.area;
+          final totalArea = origW * origH;
+          final areaRatio = candArea / totalArea;
+          if (areaRatio >= 0.05 && areaRatio <= 0.98) {
+            final asp = cand.aspectRatio;
+            final isLandscape = asp >= 1.15 && asp <= 2.35;
+            final isPortrait = asp >= 0.40 && asp <= 0.88;
+            final isSquare = allowSquare && asp >= 0.82 && asp <= 1.20;
+            if (isLandscape || isPortrait || isSquare) {
+              final score = (cand.angularScore * 0.35) +
+                  (cand.edgeConsistency * 0.30) +
+                  (cand.rectangularityScore * 0.20) +
+                  (min(1.0, areaRatio / 0.5) * 0.15);
+              if (score > bestContourScore) {
+                bestContourScore = score;
+                bestContourCorners = cand;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Candidate 2: Extremal corner approximation
     // If viewfinder ROI is provided, prioritize edge points within/near the guide frame
     List<Point<int>> candidatePoints = points;
     if (viewfinderRoi != null) {
@@ -592,18 +1058,17 @@ class CardGeometryService {
       return (corners: null, confidence: 0.2);
     }
 
-    // Aspect ratio check:
-    // Standard business card is ~1.5 to 1.8 (or 0.55 to 0.67 if vertical)
+    // Aspect ratio check (supports landscape, portrait, and square-shaped cards)
     final aspectRatio = avgWidth / avgHeight;
     final isLandscapeCard = aspectRatio >= 1.15 && aspectRatio <= 2.35;
     final isPortraitCard = aspectRatio >= 0.42 && aspectRatio <= 0.88;
+    final isSquareCard = allowSquare && aspectRatio >= 0.82 && aspectRatio <= 1.20;
 
-    if (!isLandscapeCard && !isPortraitCard) {
+    if (!isLandscapeCard && !isPortraitCard && !isSquareCard) {
       return (corners: null, confidence: 0.4);
     }
 
     // Opposite sides parallelism check:
-    // Top and bottom widths should not differ by more than 35%
     final widthRatio = min(widthTop, widthBottom) / max(widthTop, widthBottom);
     final heightRatio = min(heightLeft, heightRight) / max(heightLeft, heightRight);
 
@@ -611,17 +1076,71 @@ class CardGeometryService {
       return (corners: null, confidence: 0.5);
     }
 
+    final candidateCorners = CardCorners(
+      topLeft: origTL,
+      topRight: origTR,
+      bottomLeft: origBL,
+      bottomRight: origBR,
+    );
+
+    // Requirement 1: Verify convex quadrilateral geometry (rejects self-intersecting or bow-tie contours)
+    if (!candidateCorners.isConvex) {
+      if (bestContourCorners != null) {
+        return (corners: bestContourCorners, confidence: bestContourScore.clamp(0.0, 1.0));
+      }
+      return (corners: null, confidence: 0.3);
+    }
+
     // High confidence detected
     final confidence = (widthRatio * 0.4) + (heightRatio * 0.4) + (min(1.0, areaRatio / 0.5) * 0.2);
 
+    if (bestContourCorners != null && bestContourScore >= 0.65) {
+      return (
+        corners: bestContourCorners,
+        confidence: max(confidence, bestContourScore).clamp(0.0, 1.0),
+      );
+    }
+
     return (
-      corners: CardCorners(
-        topLeft: origTL,
-        topRight: origTR,
-        bottomLeft: origBL,
-        bottomRight: origBR,
-      ),
+      corners: candidateCorners,
       confidence: confidence.clamp(0.0, 1.0),
+    );
+  }
+
+  /// Requirement 4: Lighting correction & tone enhancement.
+  /// Analyzes average luminance and gently balances exposure without color distortion or excessive sharpening.
+  img.Image _applyGentleLightingCorrection(img.Image cardImage) {
+    double totalLum = 0.0;
+    int pixelCount = 0;
+    for (int y = 0; y < cardImage.height; y += 4) {
+      for (int x = 0; x < cardImage.width; x += 4) {
+        final p = cardImage.getPixel(x, y);
+        totalLum += (0.299 * p.r + 0.587 * p.g + 0.114 * p.b);
+        pixelCount++;
+      }
+    }
+    final avgLum = pixelCount > 0 ? (totalLum / pixelCount) : 128.0;
+
+    // In low-light / underexposed conditions (< 110 lum), gently brighten and boost contrast
+    if (avgLum < 110.0) {
+      return img.adjustColor(
+        cardImage,
+        brightness: 1.10,
+        contrast: 1.05,
+      );
+    }
+    // In harsh highlight / overexposed conditions (> 215 lum), compress highlights gently
+    if (avgLum > 215.0) {
+      return img.adjustColor(
+        cardImage,
+        brightness: 0.95,
+        contrast: 1.04,
+      );
+    }
+    // Balanced lighting: apply gentle contrast enhancement to crisp text edges and logos
+    return img.adjustColor(
+      cardImage,
+      contrast: 1.03,
     );
   }
 
@@ -654,9 +1173,559 @@ class CardGeometryService {
     return edges;
   }
 
+  /// Detects presence of an actual physical business card in [image].
+  /// Supports rectangular business cards (landscape and portrait) and square cards.
+  /// Enforces boundary edge contrast against surface, interior text/glyph variance (rejecting blank surfaces),
+  /// non-clipping margins, and adequate capture lighting/sharpness.
+  BusinessCardDetectionResult detectBusinessCardPresence(
+    img.Image image, {
+    ViewfinderNormalizedRect? viewfinderRoi,
+    bool allowSquare = true,
+  }) {
+    if (image.width < 50 || image.height < 40) {
+      return BusinessCardDetectionResult.none();
+    }
+
+    // 1. Lighting and blur assessment
+    final baseQuality = assessCaptureQuality(image);
+    if (baseQuality.isExtremelyDark ||
+        baseQuality.isExtremelyOverexposed ||
+        baseQuality.isBlurry) {
+      return BusinessCardDetectionResult(
+        isDetected: false,
+        quality: baseQuality,
+      );
+    }
+
+    // 2. Corner and boundary detection
+    final cornerDetection = detectCorners(image, viewfinderRoi: viewfinderRoi, allowSquare: allowSquare);
+    final corners = cornerDetection.corners;
+    if (corners == null || cornerDetection.confidence < 0.40) {
+      return BusinessCardDetectionResult(
+        isDetected: false,
+        confidence: cornerDetection.confidence,
+        quality: baseQuality,
+      );
+    }
+
+    // 3. Aspect ratio validation
+    final widthTop = _distance(corners.topLeft, corners.topRight);
+    final widthBottom = _distance(corners.bottomLeft, corners.bottomRight);
+    final heightLeft = _distance(corners.topLeft, corners.bottomLeft);
+    final heightRight = _distance(corners.topRight, corners.bottomRight);
+
+    final avgWidth = (widthTop + widthBottom) / 2.0;
+    final avgHeight = (heightLeft + heightRight) / 2.0;
+    if (avgWidth <= 30 || avgHeight <= 20) {
+      return BusinessCardDetectionResult(
+        isDetected: false,
+        confidence: 0.2,
+        quality: baseQuality,
+      );
+    }
+
+    final aspectRatio = avgWidth / avgHeight;
+    final isLandscape = aspectRatio >= 1.20 && aspectRatio <= 2.25;
+    final isPortrait = aspectRatio >= 0.42 && aspectRatio <= 0.82;
+    final isSquare = allowSquare && aspectRatio >= 0.82 && aspectRatio <= 1.20;
+
+    if (!isLandscape && !isPortrait && !isSquare) {
+      return BusinessCardDetectionResult(
+        isDetected: false,
+        aspectRatio: aspectRatio,
+        confidence: 0.35,
+        quality: baseQuality,
+      );
+    }
+
+    // 4. Clipping check against frame edges
+    final marginX = (image.width * 0.025).round();
+    final marginY = (image.height * 0.025).round();
+    bool isClipping = false;
+    for (final p in [
+      corners.topLeft,
+      corners.topRight,
+      corners.bottomLeft,
+      corners.bottomRight,
+    ]) {
+      if (p.x <= marginX ||
+          p.x >= (image.width - marginX) ||
+          p.y <= marginY ||
+          p.y >= (image.height - marginY)) {
+        isClipping = true;
+        break;
+      }
+    }
+
+    if (isClipping) {
+      return BusinessCardDetectionResult(
+        isDetected: false,
+        corners: corners,
+        aspectRatio: aspectRatio,
+        quality: CaptureQualityAssessment(
+          brightness: baseQuality.brightness,
+          isExtremelyDark: false,
+          isExtremelyOverexposed: false,
+          blurScore: baseQuality.blurScore,
+          isBlurry: false,
+          cardAreaRatio: baseQuality.cardAreaRatio,
+          isTooSmall: false,
+          isTooClose: false,
+          isClipping: true,
+          isSeverePerspective: false,
+          isUsableResolution: true,
+          guidanceMessage: 'Keep the full card inside the frame',
+        ),
+      );
+    }
+
+    // 5. Interior Texture & Content Variance (Distinguish from Blank Paper or Monotone Rectangles)
+    final interiorStats = _measureInteriorTextureAndContrast(image, corners);
+    if (!interiorStats.hasTextOrContent) {
+      return BusinessCardDetectionResult(
+        isDetected: false,
+        corners: corners,
+        aspectRatio: aspectRatio,
+        edgeContrast: interiorStats.edgeContrast,
+        interiorTextureVariance: interiorStats.variance,
+        hasCardContent: false,
+        quality: CaptureQualityAssessment(
+          brightness: baseQuality.brightness,
+          isExtremelyDark: false,
+          isExtremelyOverexposed: false,
+          blurScore: baseQuality.blurScore,
+          isBlurry: false,
+          cardAreaRatio: baseQuality.cardAreaRatio,
+          isTooSmall: false,
+          isTooClose: false,
+          isClipping: false,
+          isSeverePerspective: false,
+          isUsableResolution: true,
+          guidanceMessage: 'Position card inside the frame',
+        ),
+      );
+    }
+
+    // 6. Valid genuine business card identified
+    final minX = [corners.topLeft.x, corners.topRight.x, corners.bottomLeft.x, corners.bottomRight.x].reduce(min);
+    final maxX = [corners.topLeft.x, corners.topRight.x, corners.bottomLeft.x, corners.bottomRight.x].reduce(max);
+    final minY = [corners.topLeft.y, corners.topRight.y, corners.bottomLeft.y, corners.bottomRight.y].reduce(min);
+    final maxY = [corners.topLeft.y, corners.topRight.y, corners.bottomLeft.y, corners.bottomRight.y].reduce(max);
+
+    final normBox = Rect.fromLTRB(
+      (minX / image.width).clamp(0.0, 1.0),
+      (minY / image.height).clamp(0.0, 1.0),
+      (maxX / image.width).clamp(0.0, 1.0),
+      (maxY / image.height).clamp(0.0, 1.0),
+    );
+
+    final normPolygon = corners.toNormalizedPolygon(image.width, image.height);
+
+    final finalQuality = assessCaptureQuality(
+      image,
+      corners: corners,
+      confidence: cornerDetection.confidence,
+    );
+
+    final cardArea = corners.area;
+    final totalArea = image.width * image.height;
+    final cardAreaRatio = (cardArea / totalArea).clamp(0.0, 1.0);
+
+    return BusinessCardDetectionResult(
+      isDetected: true,
+      state: CardDetectionState.detected,
+      corners: corners,
+      normalizedPolygon: normPolygon,
+      normalizedBoundingBox: normBox,
+      confidence: cornerDetection.confidence,
+      aspectRatio: aspectRatio,
+      isLandscape: isLandscape,
+      isSquare: isSquare,
+      edgeContrast: interiorStats.edgeContrast,
+      interiorTextureVariance: interiorStats.variance,
+      hasCardContent: true,
+      cardAreaRatio: cardAreaRatio,
+      angularScore: corners.angularScore,
+      rectangularityScore: corners.rectangularityScore,
+      quality: finalQuality,
+    );
+  }
+
+  /// Real-time frame analysis from camera luminance byte array.
+  /// Accounts for row strides, pixel strides, sensor orientation, and lens direction.
+  BusinessCardDetectionResult detectCardInLumaBytes({
+    required List<int> lumaBytes,
+    required int width,
+    required int height,
+    int bytesPerRow = 0,
+    int bytesPerPixel = 1,
+    int sensorOrientation = 0,
+    bool isFrontFacing = false,
+    ViewfinderNormalizedRect? viewfinderRoi,
+    bool allowSquare = true,
+  }) {
+    if (width < 60 || height < 40 || lumaBytes.isEmpty) {
+      return BusinessCardDetectionResult.none();
+    }
+
+    final rowStride = bytesPerRow > 0 ? bytesPerRow : width;
+
+    img.Image thumb;
+    if (sensorOrientation != 0) {
+      thumb = convertYuvToUprightLuma(
+        lumaBytes: lumaBytes,
+        rawWidth: width,
+        rawHeight: height,
+        bytesPerRow: rowStride,
+        bytesPerPixel: bytesPerPixel,
+        sensorOrientation: sensorOrientation,
+        isFrontFacing: isFrontFacing,
+        targetWidth: 200,
+      );
+    } else {
+      // Fast downsampled thumbnail (~180px width)
+      const targetW = 180;
+      final stepX = max(1, width ~/ targetW);
+      final targetH = (height / stepX).round();
+      final stepY = stepX;
+
+      thumb = img.Image(width: targetW, height: targetH);
+      for (int ty = 0; ty < targetH; ty++) {
+        final srcY = min(height - 1, ty * stepY);
+        final rowOffset = srcY * rowStride;
+        for (int tx = 0; tx < targetW; tx++) {
+          final srcX = min(width - 1, tx * stepX);
+          final pixelIndex = rowOffset + srcX * bytesPerPixel;
+          final lum = pixelIndex < lumaBytes.length ? lumaBytes[pixelIndex] : 0;
+          thumb.setPixelRgb(tx, ty, lum, lum, lum);
+        }
+      }
+    }
+
+    return detectBusinessCardPresence(
+      thumb,
+      viewfinderRoi: viewfinderRoi,
+      allowSquare: allowSquare,
+    );
+  }
+
+  /// Evaluates boundary edge contrast and interior texture/text variance.
+  ({double variance, double edgeContrast, bool hasTextOrContent})
+      _measureInteriorTextureAndContrast(img.Image image, CardCorners corners) {
+    final int minX = [corners.topLeft.x, corners.topRight.x, corners.bottomLeft.x, corners.bottomRight.x].reduce(min);
+    final int maxX = [corners.topLeft.x, corners.topRight.x, corners.bottomLeft.x, corners.bottomRight.x].reduce(max);
+    final int minY = [corners.topLeft.y, corners.topRight.y, corners.bottomLeft.y, corners.bottomRight.y].reduce(min);
+    final int maxY = [corners.topLeft.y, corners.topRight.y, corners.bottomLeft.y, corners.bottomRight.y].reduce(max);
+
+    final cardW = maxX - minX;
+    final cardH = maxY - minY;
+    if (cardW < 30 || cardH < 20) {
+      return (variance: 0.0, edgeContrast: 0.0, hasTextOrContent: false);
+    }
+
+    final cx = (minX + maxX) / 2.0;
+    final cy = (minY + maxY) / 2.0;
+
+    // 1. Measure boundary edge contrast by sampling points towards center (card interior)
+    // and away from center (background surface).
+    double edgeDiffSum = 0.0;
+    int edgeSampleCount = 0;
+
+    final stepX = max(1, cardW ~/ 16);
+    for (int x = minX + 8; x < maxX - 8; x += stepX) {
+      final inY = (minY + (cy - minY) * 0.15).round().clamp(0, image.height - 1);
+      final outY = max(0, minY - 8);
+      final inL = image.getPixel(x, inY).r;
+      final outL = image.getPixel(x, outY).r;
+      edgeDiffSum += (inL - outL).abs();
+      edgeSampleCount++;
+
+      final inYBot = (maxY - (maxY - cy) * 0.15).round().clamp(0, image.height - 1);
+      final outYBot = min(image.height - 1, maxY + 8);
+      final inLBot = image.getPixel(x, inYBot).r;
+      final outLBot = image.getPixel(x, outYBot).r;
+      edgeDiffSum += (inLBot - outLBot).abs();
+      edgeSampleCount++;
+    }
+
+    final stepY = max(1, cardH ~/ 16);
+    for (int y = minY + 8; y < maxY - 8; y += stepY) {
+      final inX = (minX + (cx - minX) * 0.15).round().clamp(0, image.width - 1);
+      final outX = max(0, minX - 8);
+      final inL = image.getPixel(inX, y).r;
+      final outL = image.getPixel(outX, y).r;
+      edgeDiffSum += (inL - outL).abs();
+      edgeSampleCount++;
+
+      final inXRight = (maxX - (maxX - cx) * 0.15).round().clamp(0, image.width - 1);
+      final outXRight = min(image.width - 1, maxX + 8);
+      final inLRight = image.getPixel(inXRight, y).r;
+      final outLRight = image.getPixel(outXRight, y).r;
+      edgeDiffSum += (inLRight - outLRight).abs();
+      edgeSampleCount++;
+    }
+
+    final avgEdgeContrast = edgeSampleCount > 0 ? (edgeDiffSum / edgeSampleCount) : 0.0;
+
+    // 2. Interior texture variance & high-frequency edge counts
+    final int innerX1 = minX + (cardW * 0.15).round();
+    final int innerX2 = maxX - (cardW * 0.15).round();
+    final int innerY1 = minY + (cardW * 0.15).round();
+    final int innerY2 = maxY - (cardW * 0.15).round();
+
+    double lumaSum = 0.0;
+    double lumaSqSum = 0.0;
+    int sampleCount = 0;
+    int highFreqEdges = 0;
+
+    final int step = max(1, min(cardW, cardH) ~/ 30);
+
+    int prevLuma = -1;
+    for (int y = innerY1; y < innerY2; y += step) {
+      for (int x = innerX1; x < innerX2; x += step) {
+        final p = image.getPixel(x, y);
+        final luma = (0.299 * p.r + 0.587 * p.g + 0.114 * p.b).round();
+        lumaSum += luma;
+        lumaSqSum += luma * luma;
+        sampleCount++;
+
+        if (prevLuma >= 0) {
+          final diff = (luma - prevLuma).abs();
+          if (diff > 25) {
+            highFreqEdges++;
+          }
+        }
+        prevLuma = luma;
+      }
+    }
+
+    if (sampleCount < 10) {
+      return (variance: 0.0, edgeContrast: avgEdgeContrast, hasTextOrContent: false);
+    }
+
+    final mean = lumaSum / sampleCount;
+    final variance = sqrt(max(0.0, (lumaSqSum / sampleCount) - (mean * mean)));
+
+    // A real business card has printed text characters and lines:
+    // Blank surfaces (sheets of plain paper, monotone tables, solid color cards) have very low variance (< 12) or few edges (< 5).
+    // An actual business card with text lines has variance >= 12 or highFreqEdges >= 5, AND edgeContrast >= 9.0.
+    final bool hasTextOrContent = (variance >= 12.0 || highFreqEdges >= 5) && avgEdgeContrast >= 9.0;
+
+    return (
+      variance: variance,
+      edgeContrast: avgEdgeContrast,
+      hasTextOrContent: hasTextOrContent,
+    );
+  }
+
   double _distance(Point<int> p1, Point<int> p2) {
     final dx = (p1.x - p2.x).toDouble();
     final dy = (p1.y - p2.y).toDouble();
     return sqrt(dx * dx + dy * dy);
+  }
+
+  /// Converts raw YUV420 Y-plane bytes into an upright grayscale [img.Image],
+  /// correctly accounting for row strides, pixel strides, sensor orientation, and lens direction.
+  static img.Image convertYuvToUprightLuma({
+    required List<int> lumaBytes,
+    required int rawWidth,
+    required int rawHeight,
+    required int bytesPerRow,
+    int bytesPerPixel = 1,
+    required int sensorOrientation,
+    bool isFrontFacing = false,
+    int targetWidth = 200,
+  }) {
+    if (rawWidth <= 0 || rawHeight <= 0 || lumaBytes.isEmpty) {
+      return img.Image(width: 1, height: 1);
+    }
+
+    // Determine target dimensions based on orientation
+    final bool isRotated = (sensorOrientation == 90 || sensorOrientation == 270);
+    final int outW = isRotated ? targetWidth : (targetWidth * rawWidth ~/ rawHeight);
+    final int outH = isRotated ? (targetWidth * rawWidth ~/ rawHeight) : (targetWidth * rawHeight ~/ rawWidth);
+
+    final result = img.Image(width: max(1, outW), height: max(1, outH));
+
+    final int maxRawX = rawWidth - 1;
+    final int maxRawY = rawHeight - 1;
+    final int maxOutX = max(1, outW - 1);
+    final int maxOutY = max(1, outH - 1);
+
+    for (int uy = 0; uy < outH; uy++) {
+      for (int ux = 0; ux < outW; ux++) {
+        int sx = 0;
+        int sy = 0;
+
+        switch (sensorOrientation) {
+          case 90:
+            // Android back camera: 90 deg clockwise
+            sx = (uy * maxRawX ~/ maxOutY).clamp(0, maxRawX);
+            sy = ((maxOutX - ux) * maxRawY ~/ maxOutX).clamp(0, maxRawY);
+            break;
+          case 270:
+            // Android front camera / 270 deg
+            sx = ((maxOutY - uy) * maxRawX ~/ maxOutY).clamp(0, maxRawX);
+            sy = (ux * maxRawY ~/ maxOutX).clamp(0, maxRawY);
+            break;
+          case 180:
+            sx = ((maxOutX - ux) * maxRawX ~/ maxOutX).clamp(0, maxRawX);
+            sy = ((maxOutY - uy) * maxRawY ~/ maxOutY).clamp(0, maxRawY);
+            break;
+          case 0:
+          default:
+            sx = (ux * maxRawX ~/ maxOutX).clamp(0, maxRawX);
+            sy = (uy * maxRawY ~/ maxOutY).clamp(0, maxRawY);
+            break;
+        }
+
+        if (isFrontFacing && (sensorOrientation == 90 || sensorOrientation == 270)) {
+          // Mirror horizontally for front camera
+          sy = maxRawY - sy;
+        }
+
+        final int offset = sy * bytesPerRow + sx * bytesPerPixel;
+        final int lum = (offset >= 0 && offset < lumaBytes.length) ? lumaBytes[offset] : 0;
+        result.setPixelRgb(ux, uy, lum, lum, lum);
+      }
+    }
+
+    return result;
+  }
+
+  static double _perpendicularDistance(Point<int> p, Point<int> lineStart, Point<int> lineEnd) {
+    final dx = (lineEnd.x - lineStart.x).toDouble();
+    final dy = (lineEnd.y - lineStart.y).toDouble();
+    final lineLenSq = dx * dx + dy * dy;
+    if (lineLenSq == 0) {
+      final dpx = (p.x - lineStart.x).toDouble();
+      final dpy = (p.y - lineStart.y).toDouble();
+      return sqrt(dpx * dpx + dpy * dpy);
+    }
+    final num = ((p.x - lineStart.x) * dy - (p.y - lineStart.y) * dx).abs();
+    return num / sqrt(lineLenSq);
+  }
+
+  static List<Point<int>> _approximatePolygonRDP(List<Point<int>> points, double epsilon) {
+    if (points.length < 3) return points;
+
+    double maxDist = 0.0;
+    int index = 0;
+    final start = points.first;
+    final end = points.last;
+
+    for (int i = 1; i < points.length - 1; i++) {
+      final d = _perpendicularDistance(points[i], start, end);
+      if (d > maxDist) {
+        maxDist = d;
+        index = i;
+      }
+    }
+
+    if (maxDist > epsilon) {
+      final left = _approximatePolygonRDP(points.sublist(0, index + 1), epsilon);
+      final right = _approximatePolygonRDP(points.sublist(index), epsilon);
+      return [...left.sublist(0, left.length - 1), ...right];
+    } else {
+      return [start, end];
+    }
+  }
+
+  static List<Point<int>> _orderVerticesClockwise(List<Point<int>> pts) {
+    if (pts.length != 4) return pts;
+    final cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4.0;
+    final cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4.0;
+
+    final sorted = List<Point<int>>.from(pts)
+      ..sort((a, b) {
+        final angleA = atan2(a.y - cy, a.x - cx);
+        final angleB = atan2(b.y - cy, b.x - cx);
+        return angleA.compareTo(angleB);
+      });
+
+    // Find vertex closest to Top-Left (minimizing x + y)
+    int tlIdx = 0;
+    int minSum = sorted[0].x + sorted[0].y;
+    for (int i = 1; i < 4; i++) {
+      final sum = sorted[i].x + sorted[i].y;
+      if (sum < minSum) {
+        minSum = sum;
+        tlIdx = i;
+      }
+    }
+
+    return [
+      sorted[tlIdx],
+      sorted[(tlIdx + 1) % 4],
+      sorted[(tlIdx + 2) % 4],
+      sorted[(tlIdx + 3) % 4],
+    ];
+  }
+
+  static double _calculatePerimeter(List<Point<int>> pts) {
+    double perim = 0.0;
+    for (int i = 0; i < pts.length; i++) {
+      final p1 = pts[i];
+      final p2 = pts[(i + 1) % pts.length];
+      final dx = (p1.x - p2.x).toDouble();
+      final dy = (p1.y - p2.y).toDouble();
+      perim += sqrt(dx * dx + dy * dy);
+    }
+    return perim;
+  }
+
+  static List<List<Point<int>>> _findCandidateContours(
+    img.Image edgeImage,
+    int threshold,
+    int borderX,
+    int borderY,
+  ) {
+    final w = edgeImage.width;
+    final h = edgeImage.height;
+    final visited = List<bool>.filled(w * h, false);
+    final contours = <List<Point<int>>>[];
+
+    // 8-connected neighbors
+    const dx = [-1, 0, 1, 1, 1, 0, -1, -1];
+    const dy = [-1, -1, -1, 0, 1, 1, 1, 0];
+
+    for (int y = borderY; y < h - borderY; y += 2) {
+      for (int x = borderX; x < w - borderX; x += 2) {
+        final idx = y * w + x;
+        if (visited[idx]) continue;
+        if (edgeImage.getPixel(x, y).r <= threshold) continue;
+
+        // Trace component
+        final contour = <Point<int>>[];
+        final queue = <Point<int>>[Point(x, y)];
+        visited[idx] = true;
+
+        while (queue.isNotEmpty && contour.length < 500) {
+          final curr = queue.removeLast();
+          contour.add(curr);
+
+          for (int k = 0; k < 8; k++) {
+            final nx = curr.x + dx[k];
+            final ny = curr.y + dy[k];
+            if (nx < borderX || nx >= w - borderX || ny < borderY || ny >= h - borderY) {
+              continue;
+            }
+            final nIdx = ny * w + nx;
+            if (!visited[nIdx] && edgeImage.getPixel(nx, ny).r > threshold) {
+              visited[nIdx] = true;
+              queue.add(Point(nx, ny));
+            }
+          }
+        }
+
+        if (contour.length >= 24) {
+          contours.add(contour);
+          if (contours.length >= 10) break;
+        }
+      }
+      if (contours.length >= 10) break;
+    }
+
+    return contours;
   }
 }

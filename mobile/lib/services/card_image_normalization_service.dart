@@ -254,17 +254,39 @@ class CardImageNormalizationService {
         // Expand corners outward by 3% safety margin to ensure edge address text is never clipped
         final centroidX = (corners.topLeft.x + corners.topRight.x + corners.bottomLeft.x + corners.bottomRight.x) / 4.0;
         final centroidY = (corners.topLeft.y + corners.topRight.y + corners.bottomLeft.y + corners.bottomRight.y) / 4.0;
-        const expandFactor = 1.03;
+        const expandFactor = 1.018;
 
         int expX(int x) => (centroidX + (x - centroidX) * expandFactor).round().clamp(0, working.width - 1);
         int expY(int y) => (centroidY + (y - centroidY) * expandFactor).round().clamp(0, working.height - 1);
 
+        final pTL = Point<int>(expX(corners.topLeft.x), expY(corners.topLeft.y));
+        final pTR = Point<int>(expX(corners.topRight.x), expY(corners.topRight.y));
+        final pBL = Point<int>(expX(corners.bottomLeft.x), expY(corners.bottomLeft.y));
+        final pBR = Point<int>(expX(corners.bottomRight.x), expY(corners.bottomRight.y));
+
+        double dist(Point<int> a, Point<int> b) => sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+        final wTop = dist(pTL, pTR);
+        final wBottom = dist(pBL, pBR);
+        final hLeft = dist(pTL, pBL);
+        final hRight = dist(pTR, pBR);
+
+        final targetW = max(wTop, wBottom).round().clamp(350, 3600);
+        final targetH = max(hLeft, hRight).round().clamp(250, 3600);
+
+        final destImage = img.Image(
+          width: targetW,
+          height: targetH,
+          numChannels: working.numChannels,
+        );
+
         working = img.copyRectify(
           working,
-          topLeft: img.Point(expX(corners.topLeft.x), expY(corners.topLeft.y)),
-          topRight: img.Point(expX(corners.topRight.x), expY(corners.topRight.y)),
-          bottomLeft: img.Point(expX(corners.bottomLeft.x), expY(corners.bottomLeft.y)),
-          bottomRight: img.Point(expX(corners.bottomRight.x), expY(corners.bottomRight.y)),
+          topLeft: img.Point(pTL.x, pTL.y),
+          topRight: img.Point(pTR.x, pTR.y),
+          bottomLeft: img.Point(pBL.x, pBL.y),
+          bottomRight: img.Point(pBR.x, pBR.y),
+          interpolation: img.Interpolation.linear,
+          toImage: destImage,
         );
         wasPerspectiveCorrected = true;
 

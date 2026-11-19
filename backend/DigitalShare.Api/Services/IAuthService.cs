@@ -1,4 +1,5 @@
 using DigitalShare.Api.DTOs.Auth;
+using DigitalShare.Api.DTOs.Consent;
 
 namespace DigitalShare.Api.Services;
 
@@ -10,4 +11,6 @@ public interface IAuthService
     Task<bool> RevokeRefreshTokenAsync(string rawRefreshToken, string? ipAddress = null);
     Task<bool> RevokeAllUserRefreshTokensAsync(string userId);
     Task<(bool Success, string? Error)> DeleteAccountAsync(string userId, string password);
+    Task<ConsentStatusResponse> GetConsentStatusAsync(string userId);
+    Task<ConsentStatusResponse> RecordConsentAsync(string userId, RecordConsentRequest request, string? ipAddress = null, string? userAgent = null);
 }

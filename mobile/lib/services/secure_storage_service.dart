@@ -22,6 +22,27 @@ class SecureStorageService {
                   IOSOptions(accessibility: KeychainAccessibility.first_unlock),
             );
 
+  /// Generic key-value helpers for preferences and tokens
+  Future<void> writeString({required String key, required String value}) async {
+    await _storage.write(key: key, value: value);
+  }
+
+  Future<String?> readString(String key) async {
+    return await _storage.read(key: key);
+  }
+
+  Future<void> setString(String key, String value) async {
+    await _storage.write(key: key, value: value);
+  }
+
+  Future<String?> getString(String key) async {
+    return await _storage.read(key: key);
+  }
+
+  Future<void> delete(String key) async {
+    await _storage.delete(key: key);
+  }
+
   /// Saves access token alone (legacy compatibility).
   Future<void> saveAuthToken(String token) async {
     await _storage.write(key: _tokenKey, value: token);
@@ -103,6 +124,22 @@ class SecureStorageService {
     return int.tryParse(str ?? '') ?? 0;
   }
 
+  /// Checks whether a specific authenticated user has completed or dismissed the onboarding tutorial.
+  Future<bool> isOnboardingCompleted(String userId) async {
+    final effectiveId = userId.trim().isNotEmpty ? userId.trim() : 'default_user';
+    final val = await _storage.read(key: 'onboarding_completed_$effectiveId');
+    return val == 'true';
+  }
+
+  /// Sets the onboarding tutorial completion status for a specific authenticated user.
+  Future<void> setOnboardingCompleted(String userId, {bool completed = true}) async {
+    final effectiveId = userId.trim().isNotEmpty ? userId.trim() : 'default_user';
+    await _storage.write(
+      key: 'onboarding_completed_$effectiveId',
+      value: completed ? 'true' : 'false',
+    );
+  }
+
   Future<void> clearAuth() async {
     await _storage.delete(key: _tokenKey);
     await _storage.delete(key: _refreshTokenKey);
@@ -112,6 +149,11 @@ class SecureStorageService {
     await _storage.delete(key: _userEmailKey);
     await _storage.delete(key: _cachedProfileKey);
     await _storage.delete(key: _cachedConnectionsCountKey);
+  }
+
+  /// Clears all stored values (useful for tests and hard resets).
+  Future<void> clearAll() async {
+    await _storage.deleteAll();
   }
 
   Future<bool> hasToken() async {

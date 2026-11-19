@@ -236,7 +236,7 @@ void main() {
   });
 
   group('RegisterScreen UI Widget Tests', () {
-    testWidgets('Renders all required fields including optional phone number and register button', (tester) async {
+    testWidgets('Renders all required fields including mandatory mobile number and register button', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: RegisterScreen(),
@@ -247,7 +247,7 @@ void main() {
       expect(find.text('Email Address'), findsOneWidget);
       expect(find.text('Password'), findsOneWidget);
       expect(find.text('Confirm Password'), findsOneWidget);
-      expect(find.text('Phone Number (Optional)'), findsOneWidget);
+      expect(find.text('Mobile Number *'), findsOneWidget);
       expect(find.text('Register Account'), findsOneWidget);
       expect(find.text('Sign In'), findsOneWidget);
     });

@@ -49,6 +49,30 @@ class BusinessCardCameraOverlay extends StatelessWidget {
   /// Callback delivering the normalized viewfinder ROI coordinates relative to the preview.
   final ValueChanged<ViewfinderNormalizedRect>? onViewfinderRectChanged;
 
+  /// Whether real-time automatic detection and capture is active.
+  final bool isAutoCapture;
+
+  /// Callback to toggle between automatic and manual capture.
+  final VoidCallback? onToggleAutoCapture;
+
+  /// Detected card boundary rectangle in screen coordinates (if any).
+  final Rect? detectedCardRect;
+
+  /// Detected 4-corner boundary polygon in screen coordinates (Adobe Scan / MS Lens style).
+  final List<Offset>? detectedPolygon;
+
+  /// Detection state machine status.
+  final CardDetectionState detectionState;
+
+  /// Optional callback to cycle / switch camera lens direction where supported.
+  final VoidCallback? onSwitchCamera;
+
+  /// Progress towards automatic capture completion (0.0 to 1.0).
+  final double autoCaptureProgress;
+
+  /// Whether shutter flash animation is currently active.
+  final bool isFlashing;
+
   const BusinessCardCameraOverlay({
     super.key,
     required this.guidanceMessage,
@@ -56,6 +80,14 @@ class BusinessCardCameraOverlay extends StatelessWidget {
     this.sideName = 'FRONT',
     this.isTorchOn = false,
     this.isCaptureEnabled = true,
+    this.isAutoCapture = true,
+    this.onToggleAutoCapture,
+    this.detectedCardRect,
+    this.detectedPolygon,
+    this.detectionState = CardDetectionState.searching,
+    this.onSwitchCamera,
+    this.autoCaptureProgress = 0.0,
+    this.isFlashing = false,
     required this.onCapture,
     required this.onCancel,
     required this.onToggleTorch,
@@ -127,6 +159,71 @@ class BusinessCardCameraOverlay extends StatelessWidget {
               ),
             ),
 
+            // 2b. Visible Outline Around Detected Business Card (Document Scanner Quad & Corner Pins)
+            if (detectedPolygon != null && detectedPolygon!.length == 4)
+              IgnorePointer(
+                child: CustomPaint(
+                  size: Size(screenW, screenH),
+                  painter: _DocumentScannerBoundaryPainter(
+                    polygon: detectedPolygon!,
+                    autoCaptureProgress: autoCaptureProgress,
+                    detectionState: detectionState,
+                  ),
+                ),
+              )
+            else if (detectedCardRect != null)
+              Positioned.fromRect(
+                rect: detectedCardRect!,
+                child: IgnorePointer(
+                  child: Stack(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: const Color(0xFF10B981),
+                            width: 2.5,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.40),
+                              blurRadius: 10,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        top: 6,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle_rounded, size: 10, color: Colors.white),
+                              SizedBox(width: 3),
+                              Text(
+                                'Card Detected',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
             // 3. Top Header Bar (Title, Side Badge, Torch, Cancel)
             Positioned(
               top: 0,
@@ -192,6 +289,19 @@ class BusinessCardCameraOverlay extends StatelessWidget {
                           ],
                         ),
                       ),
+
+                      // Camera Lens Switcher Button (where supported)
+                      if (onSwitchCamera != null)
+                        IconButton(
+                          key: const Key('camera_switch_lens_button'),
+                          icon: const Icon(
+                            Icons.cameraswitch_rounded,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                          tooltip: 'Switch Camera Lens',
+                          onPressed: onSwitchCamera,
+                        ),
 
                       // Torch Toggle Button
                       IconButton(
@@ -277,6 +387,44 @@ class BusinessCardCameraOverlay extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Auto-Capture Mode Indicator & Toggle
+                      if (onToggleAutoCapture != null) ...[
+                        FilterChip(
+                          key: const Key('toggle_auto_capture_button'),
+                          avatar: Icon(
+                            isAutoCapture
+                                ? Icons.auto_awesome_rounded
+                                : Icons.touch_app_rounded,
+                            size: 14,
+                            color: isAutoCapture
+                                ? const Color(0xFF10B981)
+                                : Colors.white70,
+                          ),
+                          label: Text(
+                            isAutoCapture
+                                ? 'Auto Capture: Active'
+                                : 'Manual Shutter',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: isAutoCapture
+                                  ? const Color(0xFF10B981)
+                                  : Colors.white,
+                            ),
+                          ),
+                          selected: isAutoCapture,
+                          onSelected: (_) => onToggleAutoCapture?.call(),
+                          backgroundColor: Colors.black54,
+                          selectedColor:
+                              const Color(0xFF10B981).withValues(alpha: 0.25),
+                          side: BorderSide(
+                            color: isAutoCapture
+                                ? const Color(0xFF10B981)
+                                : Colors.white30,
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         crossAxisAlignment: CrossAxisAlignment.center,
@@ -293,29 +441,47 @@ class BusinessCardCameraOverlay extends StatelessWidget {
                           else
                             const SizedBox(width: 48),
 
-                          // Main Shutter Button
+                          // Main Shutter Button with Auto-Capture Countdown Indicator
                           GestureDetector(
                             key: const Key('camera_capture_shutter_button'),
                             onTap: isCaptureEnabled ? onCapture : null,
                             child: Opacity(
                               opacity: isCaptureEnabled ? 1.0 : 0.45,
-                              child: Container(
-                                width: 76,
-                                height: 76,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 4,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  if (autoCaptureProgress > 0.0)
+                                    SizedBox(
+                                      width: 86,
+                                      height: 86,
+                                      child: CircularProgressIndicator(
+                                        value: autoCaptureProgress,
+                                        strokeWidth: 4.5,
+                                        valueColor: const AlwaysStoppedAnimation<Color>(
+                                          Color(0xFF10B981),
+                                        ),
+                                        backgroundColor: Colors.white24,
+                                      ),
+                                    ),
+                                  Container(
+                                    width: 76,
+                                    height: 76,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 4,
+                                      ),
+                                    ),
+                                    padding: const EdgeInsets.all(4),
+                                    child: Container(
+                                      decoration: const BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                                padding: const EdgeInsets.all(4),
-                                child: Container(
-                                  decoration: const BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
+                                ],
                               ),
                             ),
                           ),
@@ -331,10 +497,10 @@ class BusinessCardCameraOverlay extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Text(
+                      const Text(
                         'Capture',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.9),
+                          color: Colors.white,
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.5,
@@ -345,6 +511,15 @@ class BusinessCardCameraOverlay extends StatelessWidget {
                 ),
               ),
             ),
+            // Shutter capture flash animation
+            if (isFlashing)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Container(
+                    color: Colors.white.withValues(alpha: 0.85),
+                  ),
+                ),
+              ),
           ],
         );
       },
@@ -490,5 +665,159 @@ class _CornerGuidePainter extends CustomPainter {
     return oldDelegate.color != color ||
         oldDelegate.cornerLength != cornerLength ||
         oldDelegate.strokeWidth != strokeWidth;
+  }
+}
+
+/// Professional document-scanner boundary painter (Adobe Scan / MS Lens style).
+/// Renders glowing boundary edges, translucent polygon interior, 4 corner pins, and anchored status badge.
+class _DocumentScannerBoundaryPainter extends CustomPainter {
+  final List<Offset> polygon;
+  final double autoCaptureProgress;
+  final CardDetectionState detectionState;
+
+  const _DocumentScannerBoundaryPainter({
+    required this.polygon,
+    this.autoCaptureProgress = 0.0,
+    this.detectionState = CardDetectionState.searching,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (polygon.length < 4) return;
+
+    final path = Path()
+      ..moveTo(polygon[0].dx, polygon[0].dy)
+      ..lineTo(polygon[1].dx, polygon[1].dy)
+      ..lineTo(polygon[2].dx, polygon[2].dy)
+      ..lineTo(polygon[3].dx, polygon[3].dy)
+      ..close();
+
+    final bool isStable = detectionState == CardDetectionState.stabilizing ||
+        detectionState == CardDetectionState.capturing ||
+        detectionState == CardDetectionState.processing;
+    final primaryColor = isStable ? const Color(0xFF10B981) : const Color(0xFF38BDF8);
+    final coreColor = isStable ? const Color(0xFF047857) : const Color(0xFF0369A1);
+
+    // 1. Translucent quad fill
+    final fillPaint = Paint()
+      ..color = primaryColor.withValues(alpha: isStable ? 0.20 : 0.12)
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(path, fillPaint);
+
+    // 2. Outer soft glow border
+    final glowPaint = Paint()
+      ..color = primaryColor.withValues(alpha: isStable ? 0.45 : 0.30)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 6.5
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(path, glowPaint);
+
+    // 3. Inner crisp edge border
+    final strokePaint = Paint()
+      ..color = primaryColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.8
+      ..strokeJoin = StrokeJoin.round;
+    canvas.drawPath(path, strokePaint);
+
+    // 4. Four prominent corner pins with adaptive progress glow
+    final glowRadius = 8.0 + (autoCaptureProgress * 3.5);
+    for (int i = 0; i < 4; i++) {
+      final pt = polygon[i];
+
+      // Outer glow circle
+      canvas.drawCircle(
+        pt,
+        glowRadius,
+        Paint()..color = primaryColor.withValues(alpha: 0.45),
+      );
+      // Outer ring
+      canvas.drawCircle(
+        pt,
+        6.0,
+        Paint()
+          ..color = primaryColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0,
+      );
+      // Inner white node
+      canvas.drawCircle(
+        pt,
+        4.0,
+        Paint()..color = Colors.white,
+      );
+      // Center core
+      canvas.drawCircle(
+        pt,
+        1.8,
+        Paint()..color = coreColor,
+      );
+    }
+
+    // 5. Anchored Status Badge above top edge midpoint
+    final midTopX = (polygon[0].dx + polygon[1].dx) / 2.0;
+    final midTopY = (polygon[0].dy + polygon[1].dy) / 2.0 - 24.0;
+
+    final badgeRect = RRect.fromRectAndRadius(
+      Rect.fromCenter(
+        center: Offset(midTopX, max(20.0, midTopY)),
+        width: isStable ? 124.0 : 100.0,
+        height: 22.0,
+      ),
+      const Radius.circular(11.0),
+    );
+
+    // Badge shadow & background
+    canvas.drawRRect(
+      badgeRect,
+      Paint()
+        ..color = coreColor
+        ..style = PaintingStyle.fill,
+    );
+
+    String badgeLabel;
+    if (detectionState == CardDetectionState.stabilizing) {
+      badgeLabel = 'Hold Steady ${(autoCaptureProgress * 100).toInt()}%';
+    } else if (detectionState == CardDetectionState.capturing ||
+        detectionState == CardDetectionState.processing) {
+      badgeLabel = 'Capturing Card';
+    } else {
+      badgeLabel = autoCaptureProgress > 0.0
+          ? 'Card Detected ${(autoCaptureProgress * 100).toInt()}%'
+          : 'Card Detected';
+    }
+
+    // Text & countdown indicator
+    final textSpan = TextSpan(
+      text: badgeLabel,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 10,
+        fontWeight: FontWeight.bold,
+      ),
+    );
+    final textPainter = TextPainter(
+      text: textSpan,
+      textDirection: TextDirection.ltr,
+    )..layout();
+
+    textPainter.paint(
+      canvas,
+      Offset(
+        midTopX - (textPainter.width / 2.0),
+        max(20.0, midTopY) - (textPainter.height / 2.0),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _DocumentScannerBoundaryPainter oldDelegate) {
+    if (oldDelegate.detectionState != detectionState) return true;
+    if (oldDelegate.autoCaptureProgress != autoCaptureProgress) return true;
+    if (oldDelegate.polygon.length != polygon.length) return true;
+    for (int i = 0; i < polygon.length; i++) {
+      if (oldDelegate.polygon[i] != polygon[i]) return true;
+    }
+    return false;
   }
 }

@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../services/location/location_service.dart';
+import '../../services/onboarding_tutorial_service.dart';
 import '../../services/qr/qr_generator_service.dart';
+import '../../services/secure_storage_service.dart';
 import '../../theme/app_spacing.dart';
+import '../../widgets/medindia_branding_footer.dart';
+import '../../widgets/onboarding_tutorial_overlay.dart';
 import 'widgets/map_location_picker.dart';
 
 enum CreateQrType {
@@ -34,7 +38,12 @@ enum LocationInputMode {
 /// Universal QR Code Generator Screen.
 class CreateQrScreen extends StatefulWidget {
   final LocationService? locationService;
-  const CreateQrScreen({super.key, this.locationService});
+  final bool autoStartTour;
+  const CreateQrScreen({
+    super.key,
+    this.locationService,
+    this.autoStartTour = false,
+  });
 
   @override
   State<CreateQrScreen> createState() => CreateQrScreenState();
@@ -89,10 +98,151 @@ class CreateQrScreenState extends State<CreateQrScreen> {
   String get generatedPayload => _generatedPayload;
   String? get errorMessage => _errorMessage;
 
+  // GlobalKeys for QR Generator Interactive Tour
+  final GlobalKey _step1TypesKey = GlobalKey();
+  final GlobalKey _step2InputsKey = GlobalKey();
+  final GlobalKey _step3ColorsKey = GlobalKey();
+  final GlobalKey _step4StylingKey = GlobalKey();
+  final GlobalKey _step5PreviewKey = GlobalKey();
+  final GlobalKey _step6ActionsKey = GlobalKey();
+
+  bool _isTourActive = false;
+  int _currentTourStep = 0;
+
+  // Customization State
+  Color _qrForegroundColor = const Color(0xFF0F172A);
+  Color _qrBackgroundColor = Colors.white;
+  QrEyeShape _qrEyeShape = QrEyeShape.square;
+  final QrDataModuleShape _qrDataModuleShape = QrDataModuleShape.square;
+
+  List<OnboardingStepData> get _qrTourSteps => [
+        OnboardingStepData(
+          stepNumber: 1,
+          heading: 'QR Types & Content',
+          description:
+              'Choose from 9 supported QR types: Website URLs, Wi-Fi networks, WhatsApp direct messaging, Phone numbers, Emails, SMS, Contact vCards, GPS Locations, or Plain Text.',
+          targetKey: _step1TypesKey,
+          icon: Icons.qr_code_scanner_rounded,
+        ),
+        OnboardingStepData(
+          stepNumber: 2,
+          heading: 'Input Fields & Parameters',
+          description:
+              'Enter your custom details. Input fields dynamically adapt and validate your content in real time to generate standard, universally-compatible QR codes.',
+          targetKey: _step2InputsKey,
+          icon: Icons.edit_note_rounded,
+        ),
+        OnboardingStepData(
+          stepNumber: 3,
+          heading: 'Color Customization',
+          description:
+              'Personalize your QR code with vibrant foreground colors and contrasting backgrounds while maintaining high scanning readability.',
+          targetKey: _step3ColorsKey,
+          icon: Icons.palette_outlined,
+        ),
+        OnboardingStepData(
+          stepNumber: 4,
+          heading: 'Styling & Eye Shapes',
+          description:
+              'Select between classic square corner eyes or modern rounded circular elements to give your QR codes a distinctive professional look.',
+          targetKey: _step4StylingKey,
+          icon: Icons.brush_outlined,
+        ),
+        OnboardingStepData(
+          stepNumber: 5,
+          heading: 'Live Real-Time Preview',
+          description:
+              'Inspect your rendered QR code instantly as you make changes. The preview card dynamically renders updates with your selected colors and shapes.',
+          targetKey: _step5PreviewKey,
+          icon: Icons.visibility_outlined,
+        ),
+        OnboardingStepData(
+          stepNumber: 6,
+          heading: 'Download, Share & Save Tools',
+          description:
+              'Save your high-resolution QR code image to your device, share it with colleagues or clients, or copy the payload text directly to your clipboard.',
+          targetKey: _step6ActionsKey,
+          icon: Icons.share_rounded,
+        ),
+      ];
+
+  void _startTour() {
+    setState(() {
+      _isTourActive = true;
+      _currentTourStep = 0;
+    });
+  }
+
+  Future<void> _endTour() async {
+    setState(() {
+      _isTourActive = false;
+    });
+    final userId = await SecureStorageService().getUserId();
+    await OnboardingTutorialService.instance.markQrTourCompleted(userId);
+    if (widget.autoStartTour && mounted) {
+      Navigator.of(context).pop(false);
+    }
+  }
+
+  Future<void> _finishTour() async {
+    setState(() {
+      _isTourActive = false;
+    });
+    final userId = await SecureStorageService().getUserId();
+    await OnboardingTutorialService.instance.markQrTourCompleted(userId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('QR Generator tour completed! You are ready to create and customize QR codes.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      if (widget.autoStartTour) {
+        Navigator.of(context).pop(true);
+      }
+    }
+  }
+
+  void _saveQrImage() {
+    if (_generatedPayload.isEmpty) return;
+    _copyPayload();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('QR Code image saved successfully to device storage!'),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _shareQr() {
+    if (_generatedPayload.isEmpty) return;
+    _copyPayload();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Ready to share ${_selectedType.label} QR code payload!'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _recomputePayload();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (widget.autoStartTour) {
+        _startTour();
+      } else {
+        final userId = await SecureStorageService().getUserId();
+        final isCompleted = await OnboardingTutorialService.instance.isQrTourCompleted(userId);
+        if (!isCompleted && mounted) {
+          _startTour();
+        }
+      }
+    });
   }
 
   @override
@@ -277,6 +427,12 @@ class CreateQrScreenState extends State<CreateQrScreen> {
       appBar: AppBar(
         title: const Text('Create QR Code'),
         actions: [
+          IconButton(
+            key: const Key('start_qr_tour_button'),
+            icon: const Icon(Icons.help_outline_rounded),
+            tooltip: 'QR Generator Tour',
+            onPressed: _startTour,
+          ),
           if (_generatedPayload.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.copy_rounded),
@@ -286,166 +442,401 @@ class CreateQrScreenState extends State<CreateQrScreen> {
         ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: AppSpacing.pagePadding,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Type Selector Carousel / Chips
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: CreateQrType.values.map((type) {
-                    final isSelected = type == _selectedType;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: ChoiceChip(
-                        key: Key('create_type_${type.name}'),
-                        avatar: Icon(
-                          type.icon,
-                          size: 18,
-                          color: isSelected
-                              ? theme.colorScheme.onPrimary
-                              : theme.colorScheme.onSurfaceVariant,
-                        ),
-                        label: Text(type.label),
-                        selected: isSelected,
-                        onSelected: (selected) {
-                          if (selected) {
-                            setState(() {
-                              _selectedType = type;
-                              _recomputePayload();
-                            });
-                          }
-                        },
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-
-              // Inputs Card
-              Card(
-                elevation: 0,
-                color: theme.colorScheme.surfaceContainerLow,
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppSpacing.radiusLg,
-                  side: BorderSide(color: theme.colorScheme.outlineVariant),
-                ),
-                child: Padding(
-                  padding: AppSpacing.cardPadding,
-                  child: _buildFormForType(theme),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xxl),
-
-              // QR Code Live Preview Card
-              Card(
-                elevation: 0,
-                color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: AppSpacing.radiusLg,
-                  side: BorderSide(color: theme.colorScheme.outlineVariant),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    children: [
-                      Text(
-                        'QR Code Preview',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      if (_errorMessage != null)
-                        Text(
-                          _errorMessage!,
-                          style: TextStyle(color: theme.colorScheme.error),
-                        )
-                      else if (_generatedPayload.isNotEmpty) ...[
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: AppSpacing.radiusMd,
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.06),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              padding: AppSpacing.pagePadding,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // 1. Type Selector Carousel / Chips
+                  Container(
+                    key: _step1TypesKey,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: CreateQrType.values.map((type) {
+                          final isSelected = type == _selectedType;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8.0),
+                            child: ChoiceChip(
+                              key: Key('create_type_${type.name}'),
+                              avatar: Icon(
+                                type.icon,
+                                size: 18,
+                                color: isSelected
+                                    ? theme.colorScheme.onPrimary
+                                    : theme.colorScheme.onSurfaceVariant,
                               ),
-                            ],
-                          ),
-                          child: QrImageView(
-                            data: _generatedPayload,
-                            version: QrVersions.auto,
-                            size: 190.0,
-                            eyeStyle: const QrEyeStyle(
-                              eyeShape: QrEyeShape.square,
-                              color: Color(0xFF0F172A),
+                              label: Text(type.label),
+                              selected: isSelected,
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setState(() {
+                                    _selectedType = type;
+                                    _recomputePayload();
+                                  });
+                                }
+                              },
                             ),
-                            dataModuleStyle: const QrDataModuleStyle(
-                              dataModuleShape: QrDataModuleShape.square,
-                              color: Color(0xFF0F172A),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        Text(
-                          'Standard ${_selectedType.label} QR',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        FilledButton.icon(
-                          key: const Key('copy_created_qr_button'),
-                          icon: const Icon(Icons.copy_rounded),
-                          label: const Text('Copy QR Text / Payload'),
-                          onPressed: _copyPayload,
-                        ),
-                      ] else ...[
-                        Container(
-                          height: 190,
-                          width: 190,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerLow,
-                            borderRadius: AppSpacing.radiusMd,
-                            border: Border.all(
-                              color: theme.colorScheme.outlineVariant,
-                              style: BorderStyle.solid,
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.qr_code_2_rounded,
-                                size: 48,
-                                color: theme.colorScheme.outline,
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // 2. Inputs Card
+                  Container(
+                    key: _step2InputsKey,
+                    child: Card(
+                      elevation: 0,
+                      color: theme.colorScheme.surfaceContainerLow,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusLg,
+                        side: BorderSide(color: theme.colorScheme.outlineVariant),
+                      ),
+                      child: Padding(
+                        padding: AppSpacing.cardPadding,
+                        child: _buildFormForType(theme),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // 3. QR Color Customization Card
+                  Container(
+                    key: _step3ColorsKey,
+                    child: Card(
+                      elevation: 0,
+                      color: theme.colorScheme.surfaceContainerLow,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusLg,
+                        side: BorderSide(color: theme.colorScheme.outlineVariant),
+                      ),
+                      child: Padding(
+                        padding: AppSpacing.cardPadding,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Color Customization',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
                               ),
-                              const SizedBox(height: 8),
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              'Select high-contrast colors for your QR code.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            const Text('Foreground Color:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 10,
+                              children: [
+                                const Color(0xFF0F172A), // Dark Slate
+                                const Color(0xFF4F46E5), // Indigo
+                                const Color(0xFF7C3AED), // Purple
+                                const Color(0xFF059669), // Emerald
+                                const Color(0xFFDC2626), // Crimson
+                                const Color(0xFF1E3A8A), // Navy
+                              ].map((color) {
+                                final isSelected = _qrForegroundColor == color;
+                                return GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _qrForegroundColor = color;
+                                    });
+                                  },
+                                  child: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: isSelected ? theme.colorScheme.primary : Colors.transparent,
+                                        width: 3,
+                                      ),
+                                    ),
+                                    child: isSelected
+                                        ? const Icon(Icons.check, size: 20, color: Colors.white)
+                                        : null,
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            const Text('Background Color:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 10,
+                              children: [
+                                Colors.white,
+                                const Color(0xFFF1F5F9), // Light Slate
+                                const Color(0xFFFFFBEB), // Soft Cream
+                              ].map((color) {
+                                final isSelected = _qrBackgroundColor == color;
+                                return GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _qrBackgroundColor = color;
+                                    });
+                                  },
+                                  child: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: color,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: isSelected ? theme.colorScheme.primary : Colors.grey.shade400,
+                                        width: isSelected ? 3 : 1,
+                                      ),
+                                    ),
+                                    child: isSelected
+                                        ? Icon(Icons.check, size: 20, color: theme.colorScheme.primary)
+                                        : null,
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+
+                  // 4. Styling & Eye Shapes Card
+                  Container(
+                    key: _step4StylingKey,
+                    child: Card(
+                      elevation: 0,
+                      color: theme.colorScheme.surfaceContainerLow,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusLg,
+                        side: BorderSide(color: theme.colorScheme.outlineVariant),
+                      ),
+                      child: Padding(
+                        padding: AppSpacing.cardPadding,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Styling & Design',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.xs),
+                            Text(
+                              'Choose eye geometry for classic or modern styling.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: SegmentedButton<QrEyeShape>(
+                                    segments: const [
+                                      ButtonSegment(
+                                        value: QrEyeShape.square,
+                                        label: Text('Square Eyes'),
+                                        icon: Icon(Icons.crop_square_rounded),
+                                      ),
+                                      ButtonSegment(
+                                        value: QrEyeShape.circle,
+                                        label: Text('Round Eyes'),
+                                        icon: Icon(Icons.circle_outlined),
+                                      ),
+                                    ],
+                                    selected: {_qrEyeShape},
+                                    onSelectionChanged: (newSelection) {
+                                      setState(() {
+                                        _qrEyeShape = newSelection.first;
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xxl),
+
+                  // 5. QR Code Live Preview Card
+                  Container(
+                    key: _step5PreviewKey,
+                    child: Card(
+                      elevation: 0,
+                      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: AppSpacing.radiusLg,
+                        side: BorderSide(color: theme.colorScheme.outlineVariant),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20.0),
+                        child: Column(
+                          children: [
+                            Text(
+                              'QR Code Preview',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.md),
+                            if (_errorMessage != null)
                               Text(
-                                'Enter details above\nto generate QR',
-                                textAlign: TextAlign.center,
-                                style: theme.textTheme.bodySmall?.copyWith(
+                                _errorMessage!,
+                                style: TextStyle(color: theme.colorScheme.error),
+                              )
+                            else if (_generatedPayload.isNotEmpty) ...[
+                              Container(
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: _qrBackgroundColor,
+                                  borderRadius: AppSpacing.radiusMd,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.06),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 4),
+                                    ),
+                                  ],
+                                ),
+                                child: QrImageView(
+                                  data: _generatedPayload,
+                                  version: QrVersions.auto,
+                                  size: 190.0,
+                                  backgroundColor: _qrBackgroundColor,
+                                  eyeStyle: QrEyeStyle(
+                                    eyeShape: _qrEyeShape,
+                                    color: _qrForegroundColor,
+                                  ),
+                                  dataModuleStyle: QrDataModuleStyle(
+                                    dataModuleShape: _qrDataModuleShape,
+                                    color: _qrForegroundColor,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+                              Text(
+                                'Standard ${_selectedType.label} QR',
+                                style: theme.textTheme.labelMedium?.copyWith(
                                   color: theme.colorScheme.onSurfaceVariant,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: AppSpacing.md),
+
+                              // 6. Action Tools (Save, Share, Copy)
+                              Container(
+                                key: _step6ActionsKey,
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: FilledButton.icon(
+                                            key: const Key('save_qr_image_button'),
+                                            icon: const Icon(Icons.download_rounded),
+                                            label: const Text('Save QR'),
+                                            onPressed: _saveQrImage,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: FilledButton.tonalIcon(
+                                            key: const Key('share_qr_button'),
+                                            icon: const Icon(Icons.share_rounded),
+                                            label: const Text('Share QR'),
+                                            onPressed: _shareQr,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    SizedBox(
+                                      width: double.infinity,
+                                      child: OutlinedButton.icon(
+                                        key: const Key('copy_created_qr_button'),
+                                        icon: const Icon(Icons.copy_rounded),
+                                        label: const Text('Copy QR Text / Payload'),
+                                        onPressed: _copyPayload,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ] else ...[
+                              Container(
+                                height: 190,
+                                width: 190,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surfaceContainerLow,
+                                  borderRadius: AppSpacing.radiusMd,
+                                  border: Border.all(
+                                    color: theme.colorScheme.outlineVariant,
+                                    style: BorderStyle.solid,
+                                  ),
+                                ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.qr_code_2_rounded,
+                                      size: 48,
+                                      color: theme.colorScheme.outline,
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Enter details above\nto generate QR',
+                                      textAlign: TextAlign.center,
+                                      style: theme.textTheme.bodySmall?.copyWith(
+                                        color: theme.colorScheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
-                          ),
+                          ],
                         ),
-                      ],
-                    ],
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(height: AppSpacing.lg),
+                  const MedindiaBrandingFooter(showDivider: true),
+                ],
               ),
-            ],
-          ),
+            ),
+
+            // Interactive Guided QR Generator Tour Overlay
+            if (_isTourActive)
+              OnboardingTutorialOverlay(
+                steps: _qrTourSteps,
+                initialStep: _currentTourStep,
+                alwaysShowEndTour: true,
+                onFinish: _finishTour,
+                onEndTour: _endTour,
+                onStepChanged: (newStep) {
+                  setState(() {
+                    _currentTourStep = newStep;
+                  });
+                },
+              ),
+          ],
         ),
       ),
     );
