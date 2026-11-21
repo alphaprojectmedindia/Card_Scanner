@@ -18,6 +18,29 @@ public class AnalyzeBusinessCardRequest
     [MaxLength(500)]
     public string? BackImageStorageKey { get; set; }
 
+    /// <summary>
+    /// Optional direct Base64-encoded image payload for front side.
+    /// Provides zero-storage direct multimodal invocation.
+    /// </summary>
+    public string? FrontImageBase64 { get; set; }
+
+    /// <summary>
+    /// Explicit MIME type for front image (e.g. image/jpeg, image/png, image/webp).
+    /// </summary>
+    [MaxLength(50)]
+    public string? FrontImageMimeType { get; set; }
+
+    /// <summary>
+    /// Optional direct Base64-encoded image payload for back side.
+    /// </summary>
+    public string? BackImageBase64 { get; set; }
+
+    /// <summary>
+    /// Explicit MIME type for back image (e.g. image/jpeg, image/png, image/webp).
+    /// </summary>
+    [MaxLength(50)]
+    public string? BackImageMimeType { get; set; }
+
     [Required]
     [MaxLength(150)]
     public string InvocationReason { get; set; } = string.Empty;

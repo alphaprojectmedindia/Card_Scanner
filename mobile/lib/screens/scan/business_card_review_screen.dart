@@ -92,6 +92,12 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
 
     _phones = List<BusinessCardPhone>.from(widget.cardData.phoneNumbers);
     _emails = List<BusinessCardEmail>.from(widget.cardData.emailAddresses);
+
+    _nameController.addListener(() {
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   @override
@@ -383,8 +389,8 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
         ),
       );
 
-      // Requirement 1: Automatically redirect user to Home page after database confirmation
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      // Redirect and return saved card data
+      Navigator.of(context).pop(updated);
     } on ApiException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -879,6 +885,27 @@ class _BusinessCardReviewScreenState extends State<BusinessCardReviewScreen> {
 
             // SECTION 2: CONTACT
             _buildSectionHeader(context, 'CONTACT', Icons.contact_phone_outlined),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: AppSpacing.xs),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'Detected (${_phones.length} phones, ${_emails.length} emails)',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
+              ),
+            ),
             Card(
               elevation: 0,
               color: theme.colorScheme.surfaceContainerLow,

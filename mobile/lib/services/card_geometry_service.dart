@@ -113,9 +113,7 @@ class CardCorners {
   }
 
   static double _dist(Point<int> p1, Point<int> p2) {
-    final dx = (p1.x - p2.x).toDouble();
-    final dy = (p1.y - p2.y).toDouble();
-    return sqrt(dx * dx + dy * dy);
+    return CardGeometryService.getDistance(p1, p2);
   }
 
   double get widthTop => _dist(topLeft, topRight);
@@ -507,7 +505,7 @@ class CardGeometryService {
         return CardGeometryResult.original(imagePath);
       }
 
-      final bytes = await file.readAsBytes();
+      final bytes = file.readAsBytesSync();
       final original = img.decodeImage(bytes);
       if (original == null) {
         return CardGeometryResult.original(imagePath);
@@ -620,19 +618,11 @@ class CardGeometryService {
       }
 
       // 3. Perform perspective rectification mapped to exact card dimensions
-      final widthTop = _distance(corners.topLeft, corners.topRight);
-      final widthBottom = _distance(corners.bottomLeft, corners.bottomRight);
-      final heightLeft = _distance(corners.topLeft, corners.bottomLeft);
-      final heightRight = _distance(corners.topRight, corners.bottomRight);
+      final orderedCorners = [corners.topLeft, corners.topRight, corners.bottomRight, corners.bottomLeft];
+      final destDims = findDest(orderedCorners);
 
-      final targetW = max(widthTop, widthBottom).round().clamp(350, 3600);
-      final targetH = max(heightLeft, heightRight).round().clamp(250, 3600);
-
-      final destImage = img.Image(
-        width: targetW,
-        height: targetH,
-        numChannels: uprightImage.numChannels,
-      );
+      final targetW = destDims.width.clamp(350, 3600);
+      final targetH = destDims.height.clamp(250, 3600);
 
       // Radial outward expansion (~1.8%) around quadrilateral centroid
       // to preserve rounded corners, bleed edges, and outer border artwork
@@ -643,15 +633,14 @@ class CardGeometryService {
       int expX(int x) => (centroidX + (x - centroidX) * expandFactor).round().clamp(0, uprightImage.width - 1);
       int expY(int y) => (centroidY + (y - centroidY) * expandFactor).round().clamp(0, uprightImage.height - 1);
 
-      var rectified = img.copyRectify(
-        uprightImage,
-        topLeft: img.Point(expX(corners.topLeft.x), expY(corners.topLeft.y)),
-        topRight: img.Point(expX(corners.topRight.x), expY(corners.topRight.y)),
-        bottomLeft: img.Point(expX(corners.bottomLeft.x), expY(corners.bottomLeft.y)),
-        bottomRight: img.Point(expX(corners.bottomRight.x), expY(corners.bottomRight.y)),
-        interpolation: img.Interpolation.linear,
-        toImage: destImage,
+      final expandedCorners = CardCorners(
+        topLeft: Point<int>(expX(corners.topLeft.x), expY(corners.topLeft.y)),
+        topRight: Point<int>(expX(corners.topRight.x), expY(corners.topRight.y)),
+        bottomLeft: Point<int>(expX(corners.bottomLeft.x), expY(corners.bottomLeft.y)),
+        bottomRight: Point<int>(expX(corners.bottomRight.x), expY(corners.bottomRight.y)),
       );
+
+      var rectified = warpPerspective(uprightImage, expandedCorners, targetW, targetH);
 
       // Controlled upscale if rectified card is small for crisp OCR reading
       final rectLongEdge = max(rectified.width, rectified.height);
@@ -856,57 +845,59 @@ class CardGeometryService {
     final thumb = img.copyResize(image, width: scaleW, height: scaleH);
     final gray = img.grayscale(thumb);
 
-    // Compute Sobel edges
-    final edgeImage = _computeSobelEdges(gray);
+    // 1. Gaussian Blur (5x5 kernel) to eliminate high frequency noise
+    final blur = applyGaussianBlur(gray, kernelSize: 5);
+
+    // 2. Canny Edge Detection with gradient magnitude, NMS, and adaptive hysteresis
+    final canny = applyCannyEdgeDetection(blur, adaptive: true);
+
+    // 3. Morphological Dilation (3x3 kernel) to close small gaps in card boundary
+    final edgeImage = applyMorphologicalDilation(canny, iterations: 1);
 
     // Filter candidate points: discard edge points touching the camera frame boundary (outer 2.5%)
     // to reject table edges, wood grain running off-screen, and background artifacts.
     final borderX = max(2, (scaleW * 0.025).round());
     final borderY = max(2, (scaleH * 0.025).round());
 
-    // 1. Determine peak edge magnitude across scene
-    int maxMag = 0;
-    for (int y = borderY; y < edgeImage.height - borderY; y++) {
-      for (int x = borderX; x < edgeImage.width - borderX; x++) {
-        final mag = edgeImage.getPixel(x, y).r.toInt();
-        if (mag > maxMag) maxMag = mag;
-      }
-    }
-
-    // 2. Adaptive edge thresholding:
-    // Business card perimeters exhibit the most prominent gradient in the frame.
-    // Scales adaptively between 32 (for subtle white cards on light tables) and ~42% of peak magnitude
-    // (filtering out soft wooden table grain, shadows, and fabric textures).
-    final threshold = max(32, (maxMag * 0.42).round());
-
     final points = <Point<int>>[];
     for (int y = borderY; y < edgeImage.height - borderY; y++) {
       for (int x = borderX; x < edgeImage.width - borderX; x++) {
-        if (edgeImage.getPixel(x, y).r > threshold) {
+        if (edgeImage.getPixel(x, y).r > 0) {
           points.add(Point(x, y));
         }
       }
     }
 
     if (points.length < 50) {
-      return (corners: null, confidence: 0.1);
+      // Fallback: collect points from canny or sobel gradients if dilation was sparse
+      final sobel = _computeSobelEdges(gray);
+      for (int y = borderY; y < sobel.height - borderY; y++) {
+        for (int x = borderX; x < sobel.width - borderX; x++) {
+          if (sobel.getPixel(x, y).r > 30) {
+            points.add(Point(x, y));
+          }
+        }
+      }
+      if (points.length < 50) {
+        return (corners: null, confidence: 0.1);
+      }
     }
 
     // Candidate 1: Contour extraction and Ramer-Douglas-Peucker (RDP) polygon approximation
     CardCorners? bestContourCorners;
     double bestContourScore = 0.0;
 
-    final candidateContours = _findCandidateContours(edgeImage, threshold, borderX, borderY);
+    final candidateContours = findContours(edgeImage, minPoints: 20, borderX: borderX, borderY: borderY);
     for (final contour in candidateContours) {
       if (contour.length < 24) continue;
-      final perim = _calculatePerimeter(contour);
-      final eps = perim * 0.038;
-      var approx = _approximatePolygonRDP(contour, eps);
+      final perim = calculatePerimeter(contour);
+      final eps = perim * 0.025;
+      var approx = approximatePolygonRdp(contour, eps);
       if (approx.length == 5 && approx.first == approx.last) {
         approx = approx.sublist(0, 4);
       }
       if (approx.length == 4) {
-        final ordered = _orderVerticesClockwise(approx);
+        final ordered = orderPoints(approx);
         final factorX = origW / scaleW;
         final factorY = origH / scaleH;
         final marginX = (origW * 0.02).round();
@@ -1123,9 +1114,10 @@ class CardGeometryService {
 
     // In low-light / underexposed conditions (< 110 lum), gently brighten and boost contrast
     if (avgLum < 110.0) {
+      final boost = avgLum < 75.0 ? 1.20 : 1.12;
       return img.adjustColor(
         cardImage,
-        brightness: 1.10,
+        brightness: boost,
         contrast: 1.05,
       );
     }
@@ -1142,6 +1134,358 @@ class CardGeometryService {
       cardImage,
       contrast: 1.03,
     );
+  }
+
+  /// =========================================================================
+  /// OPENCV CARD SCANNER PORT & ADAPTIVE ENHANCEMENTS
+  /// Reference implementation: https://github.com/thumbdev/OpenCV-Card-Scanner (main.py)
+  /// Ported to native Flutter / Dart without requiring Python runtime.
+  /// Enhancements: multi-orientation support (landscape, portrait, square, rotated),
+  /// Canny non-maximum suppression, adaptive hysteresis thresholding, morphological dilation,
+  /// 8-connected contour extraction, Ramer-Douglas-Peucker approximation, and bilinear perspective warp.
+  /// =========================================================================
+
+  /// Euclidean distance between two points: sqrt((p1.x - p2.x)^2 + (p1.y - p2.y)^2).
+  /// Mirrors `get_distance()` from thumbdev/OpenCV-Card-Scanner.
+  static double getDistance(Point<num> p1, Point<num> p2) {
+    final dx = (p1.x - p2.x).toDouble();
+    final dy = (p1.y - p2.y).toDouble();
+    return sqrt(dx * dx + dy * dy);
+  }
+
+  /// Orders an arbitrary 4-point quadrilateral into clockwise [topLeft, topRight, bottomRight, bottomLeft].
+  /// Mirrors and enhances `order_points()` from thumbdev/OpenCV-Card-Scanner with centroid
+  /// angular sorting and bounding-box anchor alignment, ensuring orientation-invariance for
+  /// landscape, portrait, square, and rotated business cards.
+  static List<Point<int>> orderPoints(List<Point<int>> pts) {
+    return _orderVerticesClockwise(pts);
+  }
+
+  /// Calculates destination dimensions and coordinates for perspective correction.
+  /// Mirrors `find_dest()` from thumbdev/OpenCV-Card-Scanner:
+  /// maxWidth = max(dist(bl, br), dist(tl, tr))
+  /// maxHeight = max(dist(tr, br), dist(tl, bl))
+  static ({int width, int height, List<Point<int>> destPoints}) findDest(List<Point<int>> ordered) {
+    if (ordered.length < 4) {
+      return (width: 100, height: 100, destPoints: const []);
+    }
+    final tl = ordered[0];
+    final tr = ordered[1];
+    final br = ordered[2];
+    final bl = ordered[3];
+
+    final widthA = getDistance(bl, br);
+    final widthB = getDistance(tl, tr);
+    final maxWidth = max(widthA, widthB).round();
+
+    final heightA = getDistance(tr, br);
+    final heightB = getDistance(tl, bl);
+    final maxHeight = max(heightA, heightB).round();
+
+    final destPoints = [
+      const Point<int>(0, 0),
+      Point<int>(max(0, maxWidth - 1), 0),
+      Point<int>(max(0, maxWidth - 1), max(0, maxHeight - 1)),
+      Point<int>(0, max(0, maxHeight - 1)),
+    ];
+
+    return (width: maxWidth, height: maxHeight, destPoints: destPoints);
+  }
+
+  /// 5x5 separable Gaussian blur smoothing to eliminate sensor noise, table grains, and reflections.
+  /// Equivalent to `cv2.GaussianBlur(gray, (5, 5), 0)` in OpenCV.
+  static img.Image applyGaussianBlur(img.Image gray, {int kernelSize = 5}) {
+    final w = gray.width;
+    final h = gray.height;
+    final tmp = List<int>.filled(w * h, 0);
+    final out = img.Image(width: w, height: h);
+
+    // 1D Gaussian kernel: [1, 4, 6, 4, 1] / 16 (separable 5x5 equivalent)
+    for (int y = 0; y < h; y++) {
+      final rowOffset = y * w;
+      for (int x = 0; x < w; x++) {
+        if (x < 2 || x >= w - 2) {
+          tmp[rowOffset + x] = gray.getPixel(x, y).r.toInt();
+          continue;
+        }
+        final val = (gray.getPixel(x - 2, y).r.toInt() +
+                (gray.getPixel(x - 1, y).r.toInt() << 2) +
+                gray.getPixel(x, y).r.toInt() * 6 +
+                (gray.getPixel(x + 1, y).r.toInt() << 2) +
+                gray.getPixel(x + 2, y).r.toInt()) >>
+            4;
+        tmp[rowOffset + x] = val;
+      }
+    }
+
+    for (int x = 0; x < w; x++) {
+      for (int y = 0; y < h; y++) {
+        if (y < 2 || y >= h - 2) {
+          final val = tmp[y * w + x];
+          out.setPixelRgb(x, y, val, val, val);
+          continue;
+        }
+        final val = (tmp[(y - 2) * w + x] +
+                (tmp[(y - 1) * w + x] << 2) +
+                tmp[y * w + x] * 6 +
+                (tmp[(y + 1) * w + x] << 2) +
+                tmp[(y + 2) * w + x]) >>
+            4;
+        out.setPixelRgb(x, y, val, val, val);
+      }
+    }
+
+    return out;
+  }
+
+  /// Canny edge detection with Sobel gradient operators, Non-Maximum Suppression (NMS),
+  /// and adaptive hysteresis thresholding.
+  /// Equivalent to `cv2.Canny(blur, lowThreshold, highThreshold)` in OpenCV.
+  static img.Image applyCannyEdgeDetection(
+    img.Image blur, {
+    int lowThreshold = 30,
+    int highThreshold = 80,
+    bool adaptive = true,
+  }) {
+    final w = blur.width;
+    final h = blur.height;
+
+    final mag = List<int>.filled(w * h, 0);
+    final angle = List<int>.filled(w * h, 0);
+    int peakMag = 0;
+
+    for (int y = 1; y < h - 1; y++) {
+      final rowCurr = y * w;
+
+      for (int x = 1; x < w - 1; x++) {
+        final p00 = blur.getPixel(x - 1, y - 1).r.toInt();
+        final p01 = blur.getPixel(x, y - 1).r.toInt();
+        final p02 = blur.getPixel(x + 1, y - 1).r.toInt();
+        final p10 = blur.getPixel(x - 1, y).r.toInt();
+        final p12 = blur.getPixel(x + 1, y).r.toInt();
+        final p20 = blur.getPixel(x - 1, y + 1).r.toInt();
+        final p21 = blur.getPixel(x, y + 1).r.toInt();
+        final p22 = blur.getPixel(x + 1, y + 1).r.toInt();
+
+        final gx = (p02 + (p12 << 1) + p22) - (p00 + (p10 << 1) + p20);
+        final gy = (p20 + (p21 << 1) + p22) - (p00 + (p01 << 1) + p02);
+
+        final m = min(255, sqrt(gx * gx + gy * gy).round());
+        final idx = rowCurr + x;
+        mag[idx] = m;
+        if (m > peakMag) peakMag = m;
+
+        // Direction quantization to 0, 45, 90, 135 degrees
+        double theta = atan2(gy.toDouble(), gx.toDouble()) * (180.0 / pi);
+        if (theta < 0) theta += 180.0;
+
+        if ((theta >= 0 && theta < 22.5) || (theta >= 157.5 && theta <= 180.0)) {
+          angle[idx] = 0; // horizontal gradient
+        } else if (theta >= 22.5 && theta < 67.5) {
+          angle[idx] = 45; // diagonal
+        } else if (theta >= 67.5 && theta < 112.5) {
+          angle[idx] = 90; // vertical gradient
+        } else {
+          angle[idx] = 135; // anti-diagonal
+        }
+      }
+    }
+
+    int tHigh = highThreshold;
+    int tLow = lowThreshold;
+    if (adaptive && peakMag > 20) {
+      tHigh = max(24, min(180, (peakMag * 0.38).round()));
+      tLow = max(12, (tHigh * 0.40).round());
+    }
+
+    // Non-Maximum Suppression (NMS)
+    final nms = List<int>.filled(w * h, 0);
+    for (int y = 1; y < h - 1; y++) {
+      final rowPrev = (y - 1) * w;
+      final rowCurr = y * w;
+      final rowNext = (y + 1) * w;
+
+      for (int x = 1; x < w - 1; x++) {
+        final idx = rowCurr + x;
+        final m = mag[idx];
+        if (m < tLow) continue;
+
+        int q = 0;
+        int r = 0;
+        final dir = angle[idx];
+        if (dir == 0) {
+          q = mag[idx + 1];
+          r = mag[idx - 1];
+        } else if (dir == 45) {
+          q = mag[rowPrev + x + 1];
+          r = mag[rowNext + x - 1];
+        } else if (dir == 90) {
+          q = mag[rowPrev + x];
+          r = mag[rowNext + x];
+        } else if (dir == 135) {
+          q = mag[rowPrev + x - 1];
+          r = mag[rowNext + x + 1];
+        }
+
+        if (m >= q && m >= r) {
+          nms[idx] = m;
+        }
+      }
+    }
+
+    // Hysteresis thresholding & edge tracking
+    final edgeImage = img.Image(width: w, height: h);
+    final strongIndices = <int>[];
+
+    for (int i = 0; i < w * h; i++) {
+      final v = nms[i];
+      if (v >= tHigh) {
+        nms[i] = 255;
+        strongIndices.add(i);
+      } else if (v >= tLow) {
+        nms[i] = 50; // weak edge candidate
+      } else {
+        nms[i] = 0;
+      }
+    }
+
+    while (strongIndices.isNotEmpty) {
+      final idx = strongIndices.removeLast();
+      final x = idx % w;
+      final y = idx ~/ w;
+
+      for (int dy = -1; dy <= 1; dy++) {
+        final ny = y + dy;
+        if (ny < 0 || ny >= h) continue;
+        final rowOffset = ny * w;
+        for (int dx = -1; dx <= 1; dx++) {
+          if (dx == 0 && dy == 0) continue;
+          final nx = x + dx;
+          if (nx < 0 || nx >= w) continue;
+          final nIdx = rowOffset + nx;
+          if (nms[nIdx] == 50) {
+            nms[nIdx] = 255;
+            strongIndices.add(nIdx);
+          }
+        }
+      }
+    }
+
+    for (int y = 0; y < h; y++) {
+      final rowOffset = y * w;
+      for (int x = 0; x < w; x++) {
+        final val = nms[rowOffset + x] == 255 ? 255 : 0;
+        edgeImage.setPixelRgb(x, y, val, val, val);
+      }
+    }
+
+    return edgeImage;
+  }
+
+  /// Morphological dilation using a 3x3 structuring element.
+  /// Equivalent to `cv2.dilate(edges, kernel, iterations=1)` in OpenCV.
+  /// Bridges small gaps and connects broken perimeter lines into continuous contours.
+  static img.Image applyMorphologicalDilation(img.Image edges, {int iterations = 1}) {
+    img.Image current = edges;
+    final w = edges.width;
+    final h = edges.height;
+
+    for (int iter = 0; iter < iterations; iter++) {
+      final dilated = img.Image(width: w, height: h);
+      for (int y = 0; y < h; y++) {
+        final rowPrev = max(0, y - 1);
+        final rowNext = min(h - 1, y + 1);
+        for (int x = 0; x < w; x++) {
+          if (current.getPixel(x, y).r > 0) {
+            dilated.setPixelRgb(x, y, 255, 255, 255);
+            continue;
+          }
+          final colPrev = max(0, x - 1);
+          final colNext = min(w - 1, x + 1);
+
+          final hasEdge = current.getPixel(colPrev, rowPrev).r > 0 ||
+              current.getPixel(x, rowPrev).r > 0 ||
+              current.getPixel(colNext, rowPrev).r > 0 ||
+              current.getPixel(colPrev, y).r > 0 ||
+              current.getPixel(colNext, y).r > 0 ||
+              current.getPixel(colPrev, rowNext).r > 0 ||
+              current.getPixel(x, rowNext).r > 0 ||
+              current.getPixel(colNext, rowNext).r > 0;
+
+          final val = hasEdge ? 255 : 0;
+          dilated.setPixelRgb(x, y, val, val, val);
+        }
+      }
+      current = dilated;
+    }
+    return current;
+  }
+
+  /// 8-connected contour extraction from binary edge image.
+  /// Equivalent to `cv2.findContours(dilated, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)` in OpenCV.
+  static List<List<Point<int>>> findContours(
+    img.Image dilated, {
+    int minPoints = 20,
+    int borderX = 2,
+    int borderY = 2,
+  }) {
+    return _findCandidateContours(dilated, 100, borderX, borderY, minPoints: minPoints);
+  }
+
+  /// Ramer-Douglas-Peucker polygon approximation.
+  /// Equivalent to `cv2.approxPolyDP(contour, epsilon, True)` in OpenCV.
+  /// For closed contours returning 5 vertices where the first and last points coincide or close the loop,
+  /// returns the 4 distinct quadrilateral vertices.
+  static List<Point<int>> approximatePolygonRdp(List<Point<int>> contour, double epsilon) {
+    var approx = _approximatePolygonRDP(contour, epsilon);
+    if (approx.length == 5) {
+      if (approx.first == approx.last || getDistance(approx.first, approx.last) <= max(4.0, epsilon)) {
+        approx = approx.sublist(0, 4);
+      }
+    }
+    return approx;
+  }
+
+  /// Calculates perimeter of a closed polygonal contour.
+  /// Equivalent to `cv2.arcLength(contour, True)` in OpenCV.
+  static double calculatePerimeter(List<Point<int>> pts) {
+    return _calculatePerimeter(pts);
+  }
+
+  /// Perspective transformation mapping 4 quadrilateral corners to rectangular output.
+  /// Equivalent to `cv2.warpPerspective(image, M, (maxWidth, maxHeight))` in OpenCV.
+  static img.Image warpPerspective(
+    img.Image image,
+    CardCorners corners,
+    int destWidth,
+    int destHeight,
+  ) {
+    final destImage = img.Image(
+      width: destWidth,
+      height: destHeight,
+      numChannels: image.numChannels,
+    );
+
+    return img.copyRectify(
+      image,
+      topLeft: img.Point(corners.topLeft.x, corners.topLeft.y),
+      topRight: img.Point(corners.topRight.x, corners.topRight.y),
+      bottomLeft: img.Point(corners.bottomLeft.x, corners.bottomLeft.y),
+      bottomRight: img.Point(corners.bottomRight.x, corners.bottomRight.y),
+      interpolation: img.Interpolation.linear,
+      toImage: destImage,
+    );
+  }
+
+  /// Complete card scanning detection combining Canny, Dilation, Contours, and Quad evaluation.
+  /// Mirrors `scan()` from thumbdev/OpenCV-Card-Scanner with multi-aspect-ratio enhancements.
+  CardCorners? scanCard(
+    img.Image image, {
+    bool allowSquare = true,
+    ViewfinderNormalizedRect? viewfinderRoi,
+  }) {
+    final res = detectCorners(image, viewfinderRoi: viewfinderRoi, allowSquare: allowSquare);
+    return res.corners;
   }
 
   img.Image _computeSobelEdges(img.Image gray) {
@@ -1678,8 +2022,9 @@ class CardGeometryService {
     img.Image edgeImage,
     int threshold,
     int borderX,
-    int borderY,
-  ) {
+    int borderY, {
+    int minPoints = 20,
+  }) {
     final w = edgeImage.width;
     final h = edgeImage.height;
     final visited = List<bool>.filled(w * h, false);
@@ -1700,7 +2045,7 @@ class CardGeometryService {
         final queue = <Point<int>>[Point(x, y)];
         visited[idx] = true;
 
-        while (queue.isNotEmpty && contour.length < 500) {
+        while (queue.isNotEmpty && contour.length < 1200) {
           final curr = queue.removeLast();
           contour.add(curr);
 
@@ -1718,14 +2063,15 @@ class CardGeometryService {
           }
         }
 
-        if (contour.length >= 24) {
+        if (contour.length >= minPoints) {
           contours.add(contour);
-          if (contours.length >= 10) break;
+          if (contours.length >= 25) break;
         }
       }
-      if (contours.length >= 10) break;
+      if (contours.length >= 25) break;
     }
 
+    contours.sort((a, b) => b.length.compareTo(a.length));
     return contours;
   }
 }

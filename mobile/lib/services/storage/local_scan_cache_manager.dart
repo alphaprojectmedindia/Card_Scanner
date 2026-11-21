@@ -161,9 +161,8 @@ class LocalScanCacheManager {
   Future<void> ensureLoaded() async {
     if (_isLoaded) return;
     try {
-      // Migration from legacy temporary directory if new default persistent cache is empty
-      final defaultDir = _resolveDefaultCacheDirectory();
-      if (cacheDirectory.path == defaultDir.path && cacheDirectory.path != Directory.systemTemp.path) {
+      // Migration from legacy temporary directory if persistent cache is empty
+      if (cacheDirectory.path != Directory.systemTemp.path) {
         final legacyFpFile = File('${Directory.systemTemp.path}/digital_share_fingerprint_cache.json');
         final legacyGemFile = File('${Directory.systemTemp.path}/digital_share_gemini_cache.json');
 

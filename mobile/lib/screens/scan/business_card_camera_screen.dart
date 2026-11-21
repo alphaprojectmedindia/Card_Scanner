@@ -537,7 +537,7 @@ class _BusinessCardCameraScreenState extends State<BusinessCardCameraScreen>
     } else if (_stableFrameCount < _requiredStableFrames) {
       nextGuidance = 'Aligning & focusing ($_stableFrameCount/$_requiredStableFrames)...';
     } else {
-      nextGuidance = 'Hold steady — Capturing automatically...';
+      nextGuidance = 'Card aligned & steady — Tap Capture to scan';
     }
 
     setState(() {
@@ -547,29 +547,9 @@ class _BusinessCardCameraScreenState extends State<BusinessCardCameraScreen>
       _guidanceMessage = nextGuidance;
     });
 
-    // Step 5: Automatic capture triggered ONLY when genuine card is confirmed for >= requiredStableFrames
-    // AND card is sharp (not blurry) AND lighting is acceptable
-    if (_stableFrameCount >= _requiredStableFrames &&
-        _isAutoCaptureEnabled &&
-        !detection.quality.isBlurry &&
-        !detection.quality.isExtremelyDark &&
-        !detection.quality.isExtremelyOverexposed &&
-        !_isCapturing) {
-      _detectionState = CardDetectionState.capturing;
-      debugPrint(
-        '[CardDetector Diagnostic] Auto-capture triggered! Reason: '
-        '$_requiredStableFrames consecutive stable frames reached '
-        '(blurScore: ${detection.quality.blurScore.toStringAsFixed(1)}, '
-        'brightness: ${detection.quality.brightness.toStringAsFixed(1)})',
-      );
-      _triggerAutoCapture();
-    }
-  }
-
-  Future<void> _triggerAutoCapture() async {
-    if (_isCapturing || !mounted) return;
-    await _safeStopImageStream();
-    await _handleCapture();
+    // Manual capture requirement: Automatic capture is strictly disabled.
+    // Detection runs continuously in real-time and highlights boundaries in green when stable.
+    // The user taps the Capture shutter button to initiate 4-point perspective crop and scanning.
   }
 
   @visibleForTesting
@@ -1064,7 +1044,7 @@ class _BusinessCardCameraScreenState extends State<BusinessCardCameraScreen>
               // 2. Viewfinder Overlay
               BusinessCardCameraOverlay(
                 guidanceMessage: _guidanceMessage,
-                isReady: _isCardDetected,
+                isReady: _isCardDetected && _stableFrameCount >= _requiredStableFrames,
                 detectionState: _detectionState,
                 sideName: _currentSide == CardSide.front ? 'FRONT' : 'BACK',
                 isTorchOn: _isTorchOn,

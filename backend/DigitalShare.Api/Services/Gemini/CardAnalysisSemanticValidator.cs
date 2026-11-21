@@ -24,7 +24,7 @@ public class CardAnalysisSemanticValidator
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex HonorificPrefixRegex = new(
-        @"^(?:Dr\.|Dr|Prof\.|Prof|Mr\.|Mr|Mrs\.|Mrs|Ms\.|Ms|Adv\.|Adv|Er\.|Er|CA)\b",
+        @"^(?:Dr\.|Dr|Prof\.|Prof|Mr\.|Mr|Mrs\.|Mrs|Ms\.|Ms|Adv\.|Adv|Er\.|Er|CA|Rtn\.|Rtn|Shri|Smt)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex StrictLegalOrgSuffixRegex = new(
@@ -32,7 +32,7 @@ public class CardAnalysisSemanticValidator
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex JobTitleRoleRegex = new(
-        @"\b(?:head\s+of|director\s+of|vice\s+president|managing\s+director|chief\s+executive|engineer|developer|consultant|manager|director|officer|specialist|analyst|coordinator|architect|advocate|partner|founder|proprietor|president|ceo|cto|cfo|coo|vp)\b",
+        @"\b(?:head\s+of|director\s+of|vice\s+president|managing\s+director|chief\s+executive|engineer|developer|consultant|manager|director|officer|specialist|analyst|coordinator|architect|advocate|partner|founder|co-founder|cbo|proprietor|president|chairperson|ceo|cto|cfo|coo|vp)\b",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex AddressLineIndicatorsRegex = new(
@@ -66,18 +66,31 @@ public class CardAnalysisSemanticValidator
 
         if (!string.IsNullOrWhiteSpace(validated.FullName.Value))
         {
-            if (CorporateEntitySuffixRegex.IsMatch(validated.FullName.Value))
+            var fnValue = validated.FullName.Value;
+
+            // Rule 2: Company in FullName — if the FullName field contains corporate entity suffixes
+            // (e.g. LLP, Ltd, Inc, Corp, Healthcare, Technologies, Systems, Solutions, Enterprises, etc.),
+            // it is an organization or company name, NEVER a person name. Demote to review.
+            if (CorporateEntitySuffixRegex.IsMatch(fnValue))
             {
                 validated.FullName.ReviewRequired = true;
                 validated.FullName.Confidence = Math.Min(validated.FullName.Confidence, 0.30);
-                warnings.Add($"Rule 2 violation: FullName '{validated.FullName.Value}' contains corporate or organizational entity suffixes. Demoted to review.");
+                warnings.Add($"Rule 2 violation: FullName '{fnValue}' contains corporate or organizational entity suffixes. Demoted to review.");
             }
-            else if (JobTitleRoleRegex.IsMatch(validated.FullName.Value) &&
-                     !Regex.IsMatch(validated.FullName.Value, @"\b(?:Dr|Prof|Mr|Ms|Mrs|Adv|Er|CA)\b", RegexOptions.IgnoreCase))
+            else if (JobTitleRoleRegex.IsMatch(fnValue))
             {
-                validated.FullName.ReviewRequired = true;
-                validated.FullName.Confidence = Math.Min(validated.FullName.Confidence, 0.30);
-                warnings.Add($"FullName '{validated.FullName.Value}' contains job title keywords without personal honorific.");
+                // If it is purely a job title (e.g. "Managing Director", "Partner", "Chairperson")
+                // without any personal name part or honorific, demote it.
+                var hasNameBeforeRole = Regex.IsMatch(fnValue, @"^[A-Z][a-z]+\s+[A-Z]", RegexOptions.None) ||
+                                        fnValue.Contains(',') ||
+                                        HonorificPrefixRegex.IsMatch(fnValue) ||
+                                        Regex.IsMatch(fnValue, @"\b(?:Rtn\.|Rtn|Retd\.?|Col\.?|Maj\.?|Gen\.?|F\.C\.A\.?|FCA|M\.B\.A\.?|Ph\.D\.?)\b", RegexOptions.IgnoreCase);
+                if (!hasNameBeforeRole)
+                {
+                    validated.FullName.ReviewRequired = true;
+                    validated.FullName.Confidence = Math.Min(validated.FullName.Confidence, 0.30);
+                    warnings.Add($"FullName '{fnValue}' appears to be a job title with no personal name component.");
+                }
             }
         }
 
@@ -153,7 +166,7 @@ public class CardAnalysisSemanticValidator
             }
 
             phone.NormalizedNumber = ContactNormalizationHelper.NormalizePhone(phone.Number);
-            if (!VerifyObservationGrounding(phone.SourceObservationIds, inputObservationMap, "Phone", warnings, phone.SupportingCardSide))
+            if (!VerifyObservationGrounding(phone.SourceObservationIds, inputObservationMap, "Phone", warnings, phone.SupportingCardSide, phone.IsVisuallyVerified))
             {
                 phone.ReviewRequired = true;
             }
@@ -193,7 +206,7 @@ public class CardAnalysisSemanticValidator
             }
 
             email.NormalizedEmail = norm;
-            if (!VerifyObservationGrounding(email.SourceObservationIds, inputObservationMap, "Email", warnings, email.SupportingCardSide))
+            if (!VerifyObservationGrounding(email.SourceObservationIds, inputObservationMap, "Email", warnings, email.SupportingCardSide, email.IsVisuallyVerified))
             {
                 email.ReviewRequired = true;
             }
@@ -222,7 +235,7 @@ public class CardAnalysisSemanticValidator
             if (seenWebsites.Add(trimmed.ToLowerInvariant()))
             {
                 site.Url = trimmed;
-                if (!VerifyObservationGrounding(site.SourceObservationIds, inputObservationMap, "Website", warnings, site.SupportingCardSide))
+                if (!VerifyObservationGrounding(site.SourceObservationIds, inputObservationMap, "Website", warnings, site.SupportingCardSide, site.IsVisuallyVerified))
                 {
                     warnings.Add($"Website '{trimmed}' has ungrounded observations.");
                 }
@@ -277,7 +290,7 @@ public class CardAnalysisSemanticValidator
                 warnings.Add($"Address contains company name '{validated.Company.Value}'. User verification recommended.");
             }
 
-            if (!VerifyObservationGrounding(validated.Address.SourceObservationIds, inputObservationMap, "Address", warnings, validated.Address.SupportingCardSide))
+            if (!VerifyObservationGrounding(validated.Address.SourceObservationIds, inputObservationMap, "Address", warnings, validated.Address.SupportingCardSide, validated.Address.IsVisuallyVerified))
             {
                 validated.Address.ReviewRequired = true;
             }
@@ -370,18 +383,29 @@ public class CardAnalysisSemanticValidator
         field.Value = trimmed;
 
         // Grounding check with cross-side reference and coordinate boundaries validation
-        var isGrounded = VerifyObservationGrounding(field.SourceObservationIds, observationMap, fieldName, warnings, field.SupportingCardSide);
+        var isGrounded = VerifyObservationGrounding(field.SourceObservationIds, observationMap, fieldName, warnings, field.SupportingCardSide, field.IsVisuallyVerified);
         if (!isGrounded)
         {
             field.ReviewRequired = true;
 
-            // If Gemini proposed a correction but it lacks grounding, reject the correction for this field
-            var localBaselineVal = field.OriginalLocalParserValue ?? GetLocalBaselineValue(originalRequest, fieldName);
-            if (field.WasCorrected || (!string.IsNullOrEmpty(localBaselineVal) && !string.Equals(field.Value, localBaselineVal, StringComparison.Ordinal)))
+            // KEY FIX: If this field was read directly from the image (visual verification),
+            // the image is the ground truth — do NOT revert to local baseline.
+            // Local OCR may simply have missed this text; that is not a reason to discard it.
+            if (field.IsVisuallyVerified)
             {
-                warnings.Add($"Unsupported correction for {fieldName} ('{field.Value}') was rejected due to ungrounded observations; reverted to local candidate '{localBaselineVal}'.");
-                field.Value = localBaselineVal;
-                field.WasCorrected = false;
+                warnings.Add($"{fieldName} extracted visually from image but lacks matching OCR observation ID. Retained visual value '{field.Value}' and marked for review.");
+                // Keep field.Value as-is; just mark for review so the user can confirm.
+            }
+            else
+            {
+                // If Gemini proposed a correction but it lacks grounding, reject the correction for this field
+                var localBaselineVal = field.OriginalLocalParserValue ?? GetLocalBaselineValue(originalRequest, fieldName);
+                if (field.WasCorrected || (!string.IsNullOrEmpty(localBaselineVal) && !string.Equals(field.Value, localBaselineVal, StringComparison.Ordinal)))
+                {
+                    warnings.Add($"Unsupported correction for {fieldName} ('{field.Value}') was rejected due to ungrounded observations; reverted to local candidate '{localBaselineVal}'.");
+                    field.Value = localBaselineVal;
+                    field.WasCorrected = false;
+                }
             }
         }
 
@@ -406,8 +430,18 @@ public class CardAnalysisSemanticValidator
         Dictionary<string, OcrObservationDto> observationMap,
         string fieldName,
         List<string> warnings,
-        string? supportingCardSide = null)
+        string? supportingCardSide = null,
+        bool isVisuallyVerified = false)
     {
+        // KEY FIX: When visual verification was performed and the field is visually verified,
+        // Gemini read the value directly from image pixels. It may not have a matching OCR
+        // observation ID (because on-device OCR may have missed this text entirely).
+        // In this case, skip the grounding check — the image IS the ground truth.
+        if (isVisuallyVerified && sourceObservationIds.Count == 0)
+        {
+            return true; // Visually grounded in image pixels, no OCR observation needed
+        }
+
         if (sourceObservationIds.Count == 0)
         {
             warnings.Add($"{fieldName} has no linked source observation IDs from OCR.");
@@ -421,6 +455,12 @@ public class CardAnalysisSemanticValidator
         {
             if (!observationMap.TryGetValue(id, out var obs))
             {
+                // If visually verified, an unmatched observation ID is a warning not a rejection
+                if (isVisuallyVerified)
+                {
+                    warnings.Add($"{fieldName} references observation ID '{id}' not found in OCR map, but field is visually verified from image — accepted.");
+                    continue; // Don't fail grounding for visually verified fields
+                }
                 warnings.Add($"{fieldName} references ungrounded observation ID '{id}'.");
                 allGrounded = false;
                 continue;

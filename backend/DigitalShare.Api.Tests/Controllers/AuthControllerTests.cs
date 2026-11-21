@@ -175,4 +175,116 @@ public class AuthControllerTests : IClassFixture<CustomWebApplicationFactory>
         // Assert
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
+
+    [Fact]
+    public async Task ForgotPassword_WithValidRegisteredEmail_ReturnsOk()
+    {
+        // Arrange
+        var email = $"forgot_{Guid.NewGuid()}@example.com";
+        var password = "Password123!";
+        await _client.PostAsJsonAsync("/api/auth/register", new RegisterRequest
+        {
+            Email = email,
+            Password = password,
+            ConfirmPassword = password
+        });
+
+        var forgotRequest = new ForgotPasswordRequest { Email = email };
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotRequest);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ForgotPassword_WithInvalidEmailFormat_ReturnsBadRequest()
+    {
+        // Arrange
+        var forgotRequest = new ForgotPasswordRequest { Email = "not-an-email" };
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotRequest);
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResetPassword_WithValidToken_ResetsPasswordAndAllowsNewLogin()
+    {
+        // Arrange
+        var email = $"reset_{Guid.NewGuid()}@example.com";
+        var oldPassword = "OldPassword123!";
+        var newPassword = "NewPassword456!";
+
+        await _client.PostAsJsonAsync("/api/auth/register", new RegisterRequest
+        {
+            Email = email,
+            Password = oldPassword,
+            ConfirmPassword = oldPassword
+        });
+
+        // Request reset token
+        var forgotResponse = await _client.PostAsJsonAsync("/api/auth/forgot-password", new ForgotPasswordRequest { Email = email });
+        Assert.Equal(HttpStatusCode.OK, forgotResponse.StatusCode);
+        var forgotBody = await forgotResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        var token = forgotBody.GetProperty("token").GetString();
+        Assert.NotNull(token);
+
+        // Act: Reset password
+        var resetResponse = await _client.PostAsJsonAsync("/api/auth/reset-password", new ResetPasswordRequest
+        {
+            Email = email,
+            Token = token,
+            NewPassword = newPassword,
+            ConfirmPassword = newPassword
+        });
+
+        // Assert reset succeeded
+        Assert.Equal(HttpStatusCode.OK, resetResponse.StatusCode);
+
+        // Old password must fail
+        var oldLoginResponse = await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            Email = email,
+            Password = oldPassword
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, oldLoginResponse.StatusCode);
+
+        // New password must succeed
+        var newLoginResponse = await _client.PostAsJsonAsync("/api/auth/login", new LoginRequest
+        {
+            Email = email,
+            Password = newPassword
+        });
+        Assert.Equal(HttpStatusCode.OK, newLoginResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ResetPassword_WithInvalidToken_ReturnsBadRequest()
+    {
+        // Arrange
+        var email = $"badtoken_{Guid.NewGuid()}@example.com";
+        var password = "Password123!";
+        await _client.PostAsJsonAsync("/api/auth/register", new RegisterRequest
+        {
+            Email = email,
+            Password = password,
+            ConfirmPassword = password
+        });
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/auth/reset-password", new ResetPasswordRequest
+        {
+            Email = email,
+            Token = "INVALID_EXPIRED_TOKEN",
+            NewPassword = "NewPassword456!",
+            ConfirmPassword = "NewPassword456!"
+        });
+
+        // Assert
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

@@ -105,6 +105,36 @@ class AuthService {
     return authResponse;
   }
 
+  Future<String> forgotPassword(String email) async {
+    final response = await _apiClient.post(
+      ApiConfig.forgotPasswordEndpoint,
+      body: {'email': email.trim()},
+      requiresAuth: false,
+    );
+    if (response is Map<String, dynamic> && response.containsKey('message')) {
+      return response['message'] as String;
+    }
+    return 'If an account exists with this email, a reset link has been sent.';
+  }
+
+  Future<void> resetPassword({
+    required String email,
+    required String token,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    await _apiClient.post(
+      ApiConfig.resetPasswordEndpoint,
+      body: {
+        'email': email.trim(),
+        'token': token.trim(),
+        'newPassword': newPassword,
+        'confirmPassword': confirmPassword,
+      },
+      requiresAuth: false,
+    );
+  }
+
   Future<void> logout() async {
     try {
       final refreshToken = await _storageService.getRefreshToken();

@@ -116,9 +116,10 @@ class PhoneOcrRecovery {
       if (line.isEmpty) continue;
       if (_isNonPhoneLine(line)) continue;
 
-      // Check for split segments within line (e.g. "Tel: 2345 6789 / Mob: 98765 43210")
+      // Check for split segments within line (e.g. "Tel: 2345 6789 / Mob: 98765 43210" or "+91 44 4202 3412/13")
       String? activeStdCode;
-      final segments = line.split(RegExp(r'\s*(?:[\|\/,;]|&|\band\b)\s*'));
+      final expandedLine = expandSlashPhoneExtensions(line);
+      final segments = expandedLine.split(RegExp(r'\s*(?:[\|\/,;]|&|\band\b)\s*'));
       for (final segment in segments) {
         final cands = _evaluateSegmentCandidates(
           segment,
@@ -248,6 +249,54 @@ class PhoneOcrRecovery {
       }
     }
     return null;
+  }
+
+  /// Expands slash-extension multi-phone numbers such as:
+  /// "+91 44 4202 3412/13" -> "+91 44 4202 3412, +91 44 4202 3413"
+  /// "044-42023412/13" -> "044-42023412, 044-42023413"
+  /// "4202 3412/13/14" -> "4202 3412, 4202 3413, 4202 3414"
+  static String expandSlashPhoneExtensions(String input) {
+    if (!input.contains('/')) return input;
+
+    // Pattern: phone number followed by /<1-4 digits>
+    final slashExtensionRegExp = RegExp(
+      r'(\+?\d[\d\s\-\(\)\.]{5,}\d)\s*\/\s*(\d{1,4})\b',
+    );
+
+    String result = input;
+    var match = slashExtensionRegExp.firstMatch(result);
+    int safety = 0;
+    while (match != null && safety++ < 6) {
+      final base = match.group(1)!;
+      final suffix = match.group(2)!;
+      final baseDigits = base.replaceAll(_digitsOnlyRegExp, '');
+      if (baseDigits.length >= suffix.length && suffix.length <= 4) {
+        int count = 0;
+        int targetIdx = -1;
+        for (int i = base.length - 1; i >= 0; i--) {
+          final code = base.codeUnitAt(i);
+          if (code >= 48 && code <= 57) {
+            count++;
+            if (count == suffix.length) {
+              targetIdx = i;
+              break;
+            }
+          }
+        }
+        if (targetIdx != -1) {
+          final secondPhone = base.substring(0, targetIdx) + suffix;
+          result = result.replaceRange(
+            match.start,
+            match.end,
+            '$base, $secondPhone',
+          );
+          match = slashExtensionRegExp.firstMatch(result);
+          continue;
+        }
+      }
+      break;
+    }
+    return result;
   }
 
   /// Evaluates a segment which may contain one or multiple phone candidates.

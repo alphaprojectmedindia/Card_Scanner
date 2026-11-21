@@ -17,6 +17,7 @@ import 'package:digital_share/services/imported_contact_service.dart';
 import 'package:digital_share/theme/app_colors.dart';
 import 'package:digital_share/theme/app_theme.dart';
 import 'package:digital_share/theme/theme_controller.dart';
+import 'package:digital_share/widgets/custom_bottom_navigation_bar.dart';
 import 'package:digital_share/widgets/email_selection_dialog.dart';
 import 'package:digital_share/widgets/phone_selection_dialog.dart';
 import 'package:digital_share/widgets/theme_selection_dialog.dart';
@@ -166,11 +167,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.byType(NavigationBar), findsOneWidget);
-      expect(find.text('Home'), findsOneWidget);
-      expect(find.text('Scan'), findsOneWidget);
-      expect(find.text('Connections'), findsOneWidget);
-      expect(find.text('Profile'), findsOneWidget);
+      expect(find.byType(CustomBottomNavigationBar), findsOneWidget);
+      final navBar = find.byType(CustomBottomNavigationBar);
+      expect(find.descendant(of: navBar, matching: find.text('Home')), findsOneWidget);
+      expect(find.descendant(of: navBar, matching: find.text('Contacts')), findsOneWidget);
+      expect(find.descendant(of: navBar, matching: find.text('Scan')), findsOneWidget);
+      expect(find.descendant(of: navBar, matching: find.text('Meetings')), findsOneWidget);
+      expect(find.descendant(of: navBar, matching: find.text('Profile')), findsOneWidget);
     });
 
     testWidgets('7. Home quick actions display Quick Actions & Manage Contacts cards', (tester) async {

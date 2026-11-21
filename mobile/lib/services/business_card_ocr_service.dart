@@ -92,7 +92,7 @@ class BusinessCardOcrService implements IBusinessCardOcrService {
         viewfinderRoi: viewfinderRoi,
       );
       final workingPath = normResult.normalizedPath;
-      if (normResult.temporaryFilePath != null) {
+      if (normResult.temporaryFilePath != null && normResult.temporaryFilePath != workingPath) {
         tempFilesToClean.add(normResult.temporaryFilePath!);
       }
 

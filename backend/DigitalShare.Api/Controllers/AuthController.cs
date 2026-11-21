@@ -65,7 +65,7 @@ public class AuthController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Email) && string.IsNullOrWhiteSpace(request.PhoneNumber))
         {
-            return BadRequest(new ErrorResponse("Mobile number or email is required."));
+            return BadRequest(new ErrorResponse("A valid email address is required."));
         }
 
         if (!ModelState.IsValid)
@@ -76,10 +76,67 @@ public class AuthController : ControllerBase
         var (success, response, error) = await _authService.LoginAsync(request);
         if (!success)
         {
-            return Unauthorized(new ErrorResponse(error ?? "Invalid mobile number, email, or password."));
+            return Unauthorized(new ErrorResponse(error ?? "Invalid email address or password."));
         }
 
         return Ok(response);
+    }
+
+    /// <summary>
+    /// Initiate the password recovery workflow and send a reset token via Gmail SMTP.
+    /// </summary>
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var (success, message, debugToken) = await _authService.ForgotPasswordAsync(request);
+        if (!success)
+        {
+            return BadRequest(new ErrorResponse(message));
+        }
+
+        return Ok(new
+        {
+            message,
+            token = app_is_dev_or_test() ? debugToken : null
+        });
+
+        bool app_is_dev_or_test()
+        {
+            var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+            return string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase) ||
+                   string.IsNullOrWhiteSpace(env);
+        }
+    }
+
+    /// <summary>
+    /// Reset user password using the time-limited reset token.
+    /// </summary>
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var (success, error) = await _authService.ResetPasswordAsync(request);
+        if (!success)
+        {
+            return BadRequest(new ErrorResponse(error ?? "Password reset failed."));
+        }
+
+        return Ok(new { message = "Password has been reset successfully. Please log in with your new password." });
     }
 
     /// <summary>

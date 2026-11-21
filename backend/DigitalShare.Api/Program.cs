@@ -6,6 +6,7 @@ using DigitalShare.Api.Data;
 using DigitalShare.Api.Middleware;
 using DigitalShare.Api.Models;
 using DigitalShare.Api.Services;
+using DigitalShare.Api.Services.Email;
 using DigitalShare.Api.Services.Gemini;
 using DigitalShare.Api.Services.Storage;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -155,6 +156,11 @@ builder.Services.AddSingleton<ITimeZoneService, TimeZoneService>();
 builder.Services.AddScoped<IAvailabilityService, AvailabilityService>();
 builder.Services.AddScoped<IMeetingService, MeetingService>();
 builder.Services.AddSingleton<ILegalDocumentService, LegalDocumentService>();
+
+// 5a. Gmail SMTP Email Service for Password Recovery
+builder.Services.Configure<SmtpOptions>(
+    builder.Configuration.GetSection(SmtpOptions.SectionName));
+builder.Services.AddTransient<ISmtpEmailService, GmailSmtpEmailService>();
 
 // 5b. Gemini AI Business Card Analysis Services
 builder.Services.Configure<GeminiOptions>(

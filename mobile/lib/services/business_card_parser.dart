@@ -31,7 +31,7 @@ class BusinessCardParser {
   );
 
   static final RegExp _honorificPrefixRegExp = RegExp(
-    r'^(?:dr\.|dr|prof\.|prof|er\.|er|ca|adv\.|adv|advocate|mr\.|mr|mrs\.|mrs|ms\.|ms|shri|smt|chef)\s+',
+    r'^(?:dr\.|dr|prof\.|prof|er\.|er|ca|adv\.|adv|advocate|mr\.|mr|mrs\.|mrs|ms\.|ms|rtn\.|rtn|shri|smt|chef)\s+',
     caseSensitive: false,
   );
 
@@ -140,10 +140,14 @@ class BusinessCardParser {
     'founder and chairman',
     'chairman & managing director',
     'chairman',
+    'chairperson',
+    'chair',
     'director & ceo',
     'founder & ceo',
     'founder',
     'co-founder',
+    'co-founder & cbo',
+    'cbo',
     'ceo',
     'cto',
     'cfo',
@@ -241,6 +245,10 @@ class BusinessCardParser {
     'inc',
     'llc',
     'llp',
+    'nest',
+    'pelican nest',
+    'rotary',
+    'club',
     'ltd',
     'limited',
     'pvt ltd',
@@ -1015,9 +1023,15 @@ ${backRawText.trim()}
     }
 
     return BusinessCardData(
-      fullName: chosenName,
-      company: chosenCompany,
-      jobTitle: chosenJobTitle,
+      fullName: (chosenName != null && chosenName.trim().isNotEmpty)
+          ? chosenName.trim()
+          : null,
+      company: (chosenCompany != null && chosenCompany.trim().isNotEmpty)
+          ? chosenCompany.trim()
+          : null,
+      jobTitle: (chosenJobTitle != null && chosenJobTitle.trim().isNotEmpty)
+          ? chosenJobTitle.trim()
+          : null,
       phoneNumbers: mergedPhones,
       emailAddresses: mergedEmails,
       website: chosenWebsite,
@@ -1609,9 +1623,15 @@ ${backRawText.trim()}
     }
 
     return BusinessCardData(
-      fullName: chosenFullName,
-      company: chosenCompany,
-      jobTitle: chosenJobTitle,
+      fullName: (chosenFullName.trim().isNotEmpty)
+          ? chosenFullName.trim()
+          : null,
+      company: (chosenCompany != null && chosenCompany.trim().isNotEmpty)
+          ? chosenCompany.trim()
+          : null,
+      jobTitle: (chosenJobTitle != null && chosenJobTitle.trim().isNotEmpty)
+          ? chosenJobTitle.trim()
+          : null,
       phoneNumbers: phoneNumbers,
       emailAddresses: emails,
       website: website,
@@ -1667,8 +1687,9 @@ ${backRawText.trim()}
       final rightCol =
           validLines.where((l) => l.boundingBox.left >= midX - gutterTolerance).toList();
 
-      if (leftCol.length >= 2 &&
-          rightCol.length >= 2 &&
+      if (leftCol.isNotEmpty &&
+          rightCol.isNotEmpty &&
+          (leftCol.length >= 2 || rightCol.length >= 2) &&
           (leftCol.length + rightCol.length) >= (validLines.length * 0.75)) {
         leftCol.sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
         rightCol.sort((a, b) => a.boundingBox.top.compareTo(b.boundingBox.top));
@@ -2246,7 +2267,22 @@ ${backRawText.trim()}
     );
     if (all.isEmpty) return null;
     final best = all.first;
-    return best.classificationScore >= 35 ? best : null;
+    if (best.classificationScore < 35) return null;
+
+    if (all.length > 1) {
+      final second = all[1];
+      if ((best.classificationScore - second.classificationScore).abs() < 10) {
+        final bestLine = lines[best.lineIndex];
+        final bool hasDecisiveSignal = _honorificPrefixRegExp.hasMatch(bestLine) ||
+            (credentialBoostIndices?.contains(best.lineIndex) ?? false) ||
+            (jobTitleIndex != null && (best.lineIndex == jobTitleIndex - 1 || best.lineIndex == jobTitleIndex + 1)) ||
+            extractedEmails.any((e) => e.email.toLowerCase().contains(best.value.split(' ').first.toLowerCase()));
+        if (!hasDecisiveSignal) {
+          return null;
+        }
+      }
+    }
+    return best;
   }
 
   _ScoredCandidate? _findBestCompanyCandidate(
@@ -2614,7 +2650,8 @@ ${backRawText.trim()}
 
     // Signal 1: Known job title dictionary keyword match
     for (final kw in _jobTitleKeywords) {
-      if (lower == kw ||
+      if (RegExp(r'\b' + RegExp.escape(kw) + r'\b', caseSensitive: false).hasMatch(lower) ||
+          lower == kw ||
           lower.startsWith('$kw ') ||
           lower.endsWith(' $kw') ||
           lower.contains(' $kw ') ||
@@ -2678,7 +2715,10 @@ ${backRawText.trim()}
           w == 'cto' ||
           w == 'cfo' ||
           w == 'coo' ||
-          w == 'cio') {
+          w == 'cio' ||
+          w == 'chairperson' ||
+          w == 'chair' ||
+          w == 'cbo') {
         hasOccupationalWord = true;
         break;
       }
@@ -2780,7 +2820,7 @@ ${backRawText.trim()}
     }
     // Organization / corporate suffixes must not become Person Name
     if (RegExp(
-      r'\b(ltd\.?|limited|pvt\.?|private|llc|llp|inc\.?|corp\.?|corporation|company|companies|technolog(?:y|ies)|tech|solutions?|services?|enterprises?|industr(?:y|ies)|systems?|laborator(?:y|ies)|labs?|holdings?|group|consulting|consultanc(?:y|ies)|associates?|partners?|hospitals?|clinics?|healthcare|health\s+care|university|universities|colleges?|schools?|institutes?|foundations?|events?|equipments?|medical|engineering|manufacturing|traders?|court|high\s+court|supreme\s+court|government|govt|realty|realtors?|brokerages?|institutions?|educational?|support|customer\s+support|delivery|fast\s+delivery|logistics|shipping|travels?|tours?|pharma(?:ceuticals?)?|pharmacy|diagnostics?|dental|optical|studios?|media|digital|creatives?|agenc(?:y|ies)|global|international|express|transport(?:ation)?|cargo|freight|courier|infra(?:structure)?|builders?|developers?|properties|estates?|ventures?|capital|finance|financial|investments?|insurance|wealth|security|securities|staffing|telecom(?:munications?)?|networks?|energy|solar|power|bazaar|supermarket|hypermarket|mart|stores?|shops?|restaurant|cafe|cafes|hotels?|motels?|resorts?|spas?|salons?|garages?|motors?|automotive|auto|center|centers|centre|centres|hub|hubs|zones?|interactive|dynamics?|innovations?|designs?|advisory|advisors?|managements?|software|hardware)\b',
+      r'\b(ltd\.?|limited|pvt\.?|private|llc|llp|nest|rotary|club|inc\.?|corp\.?|corporation|company|companies|technolog(?:y|ies)|tech|solutions?|services?|enterprises?|industr(?:y|ies)|systems?|laborator(?:y|ies)|labs?|holdings?|group|consulting|consultanc(?:y|ies)|associates?|partners?|hospitals?|clinics?|healthcare|health\s+care|university|universities|colleges?|schools?|institutes?|foundations?|events?|equipments?|medical|engineering|manufacturing|traders?|court|high\s+court|supreme\s+court|government|govt|realty|realtors?|brokerages?|institutions?|educational?|support|customer\s+support|delivery|fast\s+delivery|logistics|shipping|travels?|tours?|pharma(?:ceuticals?)?|pharmacy|diagnostics?|dental|optical|studios?|media|digital|creatives?|agenc(?:y|ies)|global|international|express|transport(?:ation)?|cargo|freight|courier|infra(?:structure)?|builders?|developers?|properties|estates?|ventures?|capital|finance|financial|investments?|insurance|wealth|security|securities|staffing|telecom(?:munications?)?|networks?|energy|solar|power|bazaar|supermarket|hypermarket|mart|stores?|shops?|restaurant|cafe|cafes|hotels?|motels?|resorts?|spas?|salons?|garages?|motors?|automotive|auto|center|centers|centre|centres|hub|hubs|zones?|interactive|dynamics?|innovations?|designs?|advisory|advisors?|managements?|software|hardware)\b',
       caseSensitive: false,
     ).hasMatch(trimmed)) {
       return -100;
@@ -2797,7 +2837,7 @@ ${backRawText.trim()}
       return -100;
     }
     // Job titles must not become Person Name (unless qualified with personal honorific / credential)
-    if (RegExp(r'\b(director|managing\s+director|executive\s+director|manager|engineer|developer|consultant|officer|president|vice\s+president|vp|head|lead|founder|partner|specialist|analyst|associate|architect|designer|coordinator|advisor|secretary|broker|realtor|commissioner)\b', caseSensitive: false).hasMatch(trimmed) &&
+    if (RegExp(r'\b(director|managing\s+director|executive\s+director|manager|engineer|developer|consultant|officer|president|vice\s+president|vp|head|lead|founder|co-founder|partner|chairperson|chair|cbo|specialist|analyst|associate|architect|designer|coordinator|advisor|secretary|broker|realtor|commissioner)\b', caseSensitive: false).hasMatch(trimmed) &&
         !_honorificPrefixRegExp.hasMatch(trimmed) &&
         !hasAttachedCredentials) {
       return -100;
@@ -2858,14 +2898,25 @@ ${backRawText.trim()}
         .where((w) => w.isNotEmpty)
         .toList();
 
+    final bool matchesEmail = extractedEmails.any((e) {
+      final user = e.email.split('@').first.toLowerCase();
+      final cleanUser = user.replaceAll(RegExp(r'[^a-z]'), '');
+      final cleanLine = lower.replaceAll(RegExp(r'[^a-z]'), '');
+      if (cleanUser.isNotEmpty && cleanLine.isNotEmpty) {
+        if (cleanUser.contains(cleanLine) || cleanLine.contains(cleanUser)) return true;
+      }
+      final userParts = user.split(RegExp(r'[^a-z0-9]+')).where((p) => p.length >= 2).toList();
+      return userParts.any((p) => words.any((w) => w.toLowerCase() == p || (p.length >= 3 && w.toLowerCase().startsWith(p))));
+    });
+
     bool hasPersonalSignal = _honorificPrefixRegExp.hasMatch(trimmed) ||
         hasAttachedCredentials ||
         isAdjacentToJobTitle ||
-        extractedEmails.any((e) {
-          final user = e.email.split('@').first.toLowerCase();
-          final cleanLine = lower.replaceAll(RegExp(r'[^a-z]'), '');
-          return user.contains(cleanLine) || (cleanLine.length >= 5 && cleanLine.contains(user));
-        });
+        matchesEmail;
+
+    if (matchesEmail) {
+      score += 25;
+    }
 
     if (words.length == 1) {
       final matchesEmailUser = extractedEmails.any((e) {

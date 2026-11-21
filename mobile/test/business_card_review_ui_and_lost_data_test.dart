@@ -276,6 +276,7 @@ void main() {
       expect(find.byKey(const Key('phone_field_0')), findsOneWidget);
       expect(find.byKey(const Key('phone_field_1')), findsOneWidget);
 
+      await tester.ensureVisible(find.byKey(const Key('delete_phone_0')));
       await tester.tap(find.byKey(const Key('delete_phone_0')));
       await tester.pumpAndSettle();
 

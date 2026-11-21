@@ -542,21 +542,31 @@ void main() {
       ));
 
       // Tap physical card mode
+      await tester.ensureVisible(find.byKey(const Key('scan_physical_card_button')));
       await tester.tap(find.byKey(const Key('scan_physical_card_button')));
       await tester.pumpAndSettle();
 
       // Pick first image from gallery
+      await tester.ensureVisible(find.byKey(const Key('inline_choose_gallery_button')));
       await tester.tap(find.byKey(const Key('inline_choose_gallery_button')));
+      await tester.runAsync(() async {
+        await Future.delayed(const Duration(milliseconds: 250));
+      });
       await tester.pumpAndSettle();
 
       expect(find.text('Preview & Add Card Sides'), findsOneWidget);
 
       // Now pick a second image from gallery via retake
       fakePicker.fileToReturn = XFile(path2);
+      await tester.ensureVisible(find.byKey(const Key('retake_front_button')));
       await tester.tap(find.byKey(const Key('retake_front_button')));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.byKey(const Key('retake_front_gallery_button')));
       await tester.tap(find.byKey(const Key('retake_front_gallery_button')));
+      await tester.runAsync(() async {
+        await Future.delayed(const Duration(milliseconds: 250));
+      });
       await tester.pumpAndSettle();
 
       expect(find.text('Preview & Add Card Sides'), findsOneWidget);
@@ -575,10 +585,15 @@ void main() {
         ),
       ));
 
+      await tester.ensureVisible(find.byKey(const Key('scan_physical_card_button')));
       await tester.tap(find.byKey(const Key('scan_physical_card_button')));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.byKey(const Key('inline_choose_gallery_button')));
       await tester.tap(find.byKey(const Key('inline_choose_gallery_button')));
+      await tester.runAsync(() async {
+        await Future.delayed(const Duration(milliseconds: 250));
+      });
       await tester.pumpAndSettle();
 
       expect(find.text('Preview & Add Card Sides'), findsOneWidget);

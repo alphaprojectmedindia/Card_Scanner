@@ -387,44 +387,6 @@ class BusinessCardCameraOverlay extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Auto-Capture Mode Indicator & Toggle
-                      if (onToggleAutoCapture != null) ...[
-                        FilterChip(
-                          key: const Key('toggle_auto_capture_button'),
-                          avatar: Icon(
-                            isAutoCapture
-                                ? Icons.auto_awesome_rounded
-                                : Icons.touch_app_rounded,
-                            size: 14,
-                            color: isAutoCapture
-                                ? const Color(0xFF10B981)
-                                : Colors.white70,
-                          ),
-                          label: Text(
-                            isAutoCapture
-                                ? 'Auto Capture: Active'
-                                : 'Manual Shutter',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: isAutoCapture
-                                  ? const Color(0xFF10B981)
-                                  : Colors.white,
-                            ),
-                          ),
-                          selected: isAutoCapture,
-                          onSelected: (_) => onToggleAutoCapture?.call(),
-                          backgroundColor: Colors.black54,
-                          selectedColor:
-                              const Color(0xFF10B981).withValues(alpha: 0.25),
-                          side: BorderSide(
-                            color: isAutoCapture
-                                ? const Color(0xFF10B981)
-                                : Colors.white30,
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         crossAxisAlignment: CrossAxisAlignment.center,
@@ -441,7 +403,7 @@ class BusinessCardCameraOverlay extends StatelessWidget {
                           else
                             const SizedBox(width: 48),
 
-                          // Main Shutter Button with Auto-Capture Countdown Indicator
+                          // Main Shutter Button for manual capture
                           GestureDetector(
                             key: const Key('camera_capture_shutter_button'),
                             onTap: isCaptureEnabled ? onCapture : null,

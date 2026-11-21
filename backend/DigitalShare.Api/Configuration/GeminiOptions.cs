@@ -14,14 +14,17 @@ public class GeminiOptions
     public string ApiKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Configurable Gemini model identifier (e.g. "gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash").
+    /// Configurable Gemini model identifier. Use a model that supports multimodal image input and
+    /// structured JSON output (responseMimeType). Supported: "gemini-2.0-flash", "gemini-2.5-flash",
+    /// "gemini-1.5-flash", "gemini-1.5-pro". Avoid non-existent aliases like "gemini-3.8-flash".
     /// </summary>
-    public string ModelId { get; set; } = "gemini-3.8-flash";
+    public string ModelId { get; set; } = "gemini-2.0-flash";
 
     /// <summary>
-    /// Optional lighter/faster fallback model identifier.
+    /// Optional lighter/faster fallback model identifier used when the primary model fails or is
+    /// rate-limited. Supported: "gemini-2.0-flash-lite", "gemini-1.5-flash-8b".
     /// </summary>
-    public string FallbackModelId { get; set; } = "gemini-3.5-flash-lite";
+    public string FallbackModelId { get; set; } = "gemini-2.0-flash-lite";
 
     /// <summary>
     /// REST endpoint format for Google GenAI v1beta generateContent.
@@ -30,9 +33,15 @@ public class GeminiOptions
     public string EndpointTemplate { get; set; } = "https://generativelanguage.googleapis.com/v1beta/models/{0}:generateContent";
 
     /// <summary>
-    /// Total request timeout in seconds before failing soft to local OCR.
+    /// Total request timeout in seconds for text-only Gemini requests.
     /// </summary>
-    public int TimeoutSeconds { get; set; } = 8;
+    public int TimeoutSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// Total request timeout in seconds for multimodal (image+text) Gemini requests.
+    /// Multimodal calls are slower due to image tokenization; use a longer timeout.
+    /// </summary>
+    public int TimeoutSecondsMultimodal { get; set; } = 45;
 
     /// <summary>
     /// Bounded retry count for transient HTTP 429 and 503 errors.
@@ -45,15 +54,15 @@ public class GeminiOptions
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// Configurable cost per 1M input/prompt tokens in USD (e.g. 0.15 for gemini-3.8-flash).
-    /// Used for non-billing cost estimations.
+    /// Configurable cost per 1M input/prompt tokens in USD (e.g. 0.10 for gemini-2.0-flash).
+    /// Used for non-billing cost estimations only; actual billing is via Google Cloud Console.
     /// </summary>
-    public decimal InputPricePerMillionTokens { get; set; } = 0.15m;
+    public decimal InputPricePerMillionTokens { get; set; } = 0.10m;
 
     /// <summary>
-    /// Configurable cost per 1M output/candidate tokens in USD (e.g. 0.60 for gemini-3.8-flash).
-    /// Used for non-billing cost estimations.
+    /// Configurable cost per 1M output/candidate tokens in USD (e.g. 0.40 for gemini-2.0-flash).
+    /// Used for non-billing cost estimations only; actual billing is via Google Cloud Console.
     /// </summary>
-    public decimal OutputPricePerMillionTokens { get; set; } = 0.60m;
+    public decimal OutputPricePerMillionTokens { get; set; } = 0.40m;
 }
 

@@ -120,10 +120,14 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
         }
 
         // 5. Execute Gemini REST call with Polly / bounded retries
+        // Use longer timeout for multimodal (image) requests — image tokenization takes more time.
+        var isMultimodal = request.AnalysisMode?.Equals("MultimodalVision", StringComparison.OrdinalIgnoreCase) == true;
+        var timeoutSeconds = isMultimodal ? _options.TimeoutSecondsMultimodal : _options.TimeoutSeconds;
+
         try
         {
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             var rawAnalysisResponse = await ExecuteGeminiCallWithRetriesAsync(request, timeoutCts.Token);
 
@@ -150,7 +154,7 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Gemini API call timed out after {Timeout}s. Falling back to local OCR baseline.", _options.TimeoutSeconds);
+            _logger.LogWarning("Gemini API call timed out after {Timeout}s. Falling back to local OCR baseline.", isMultimodal ? _options.TimeoutSecondsMultimodal : _options.TimeoutSeconds);
             await _idempotencyManager.FailJobAsync(job, "Request timed out.", ct);
             var fallback = BuildFallbackFromBaseline(request, "Gemini API timed out; defaulted to local OCR draft.", stopwatch.ElapsedMilliseconds);
             fallback.GeminiApiExecuted = true; // request was attempted/sent to Google
@@ -262,10 +266,28 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
         bool backRetrieved = false;
         string? retrievalFailure = null;
 
-        // Path B: If MultimodalVision is requested, retrieve and encode both front and back images
+        // Path B: If MultimodalVision is requested, retrieve and validate front and back images
         if (isMultimodal)
         {
-            if (!string.IsNullOrWhiteSpace(request.FrontImageStorageKey))
+            byte[]? frontBytes = null;
+            string? frontMime = null;
+
+            // 1. Check direct base64 front payload
+            if (!string.IsNullOrWhiteSpace(request.FrontImageBase64))
+            {
+                try
+                {
+                    frontBytes = Convert.FromBase64String(request.FrontImageBase64.Trim());
+                    frontMime = DetectImageMimeType(frontBytes) ?? request.FrontImageMimeType;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to decode direct FrontImageBase64 payload.");
+                }
+            }
+
+            // 2. Fall back to storage if direct base64 was not provided
+            if (frontBytes == null && !string.IsNullOrWhiteSpace(request.FrontImageStorageKey))
             {
                 try
                 {
@@ -278,16 +300,8 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
                             await frontStream.CopyToAsync(ms, ct);
                             if (ms.Length > 0)
                             {
-                                var base64Data = Convert.ToBase64String(ms.ToArray());
-                                partsList.Add(new JsonObject
-                                {
-                                    ["inlineData"] = new JsonObject
-                                    {
-                                        ["mimeType"] = "image/jpeg",
-                                        ["data"] = base64Data
-                                    }
-                                });
-                                frontRetrieved = true;
+                                frontBytes = ms.ToArray();
+                                frontMime = DetectImageMimeType(frontBytes) ?? request.FrontImageMimeType;
                             }
                         }
                     }
@@ -298,7 +312,40 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
                 }
             }
 
-            if (!string.IsNullOrWhiteSpace(request.BackImageStorageKey))
+            if (frontBytes != null && frontBytes.Length > 0)
+            {
+                var effectiveMime = frontMime ?? "image/jpeg";
+                var base64Data = Convert.ToBase64String(frontBytes);
+                partsList.Add(new JsonObject
+                {
+                    ["inlineData"] = new JsonObject
+                    {
+                        ["mimeType"] = effectiveMime,
+                        ["data"] = base64Data
+                    }
+                });
+                frontRetrieved = true;
+                _logger.LogInformation("Attached front card image ({Size} bytes, MIME: {Mime}) to Gemini request payload", frontBytes.Length, effectiveMime);
+            }
+
+            byte[]? backBytes = null;
+            string? backMime = null;
+
+            // Check direct base64 back payload
+            if (!string.IsNullOrWhiteSpace(request.BackImageBase64))
+            {
+                try
+                {
+                    backBytes = Convert.FromBase64String(request.BackImageBase64.Trim());
+                    backMime = DetectImageMimeType(backBytes) ?? request.BackImageMimeType;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to decode direct BackImageBase64 payload.");
+                }
+            }
+
+            if (backBytes == null && !string.IsNullOrWhiteSpace(request.BackImageStorageKey))
             {
                 try
                 {
@@ -311,16 +358,8 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
                             await backStream.CopyToAsync(ms, ct);
                             if (ms.Length > 0)
                             {
-                                var backBase64Data = Convert.ToBase64String(ms.ToArray());
-                                partsList.Add(new JsonObject
-                                {
-                                    ["inlineData"] = new JsonObject
-                                    {
-                                        ["mimeType"] = "image/jpeg",
-                                        ["data"] = backBase64Data
-                                    }
-                                });
-                                backRetrieved = true;
+                                backBytes = ms.ToArray();
+                                backMime = DetectImageMimeType(backBytes) ?? request.BackImageMimeType;
                             }
                         }
                     }
@@ -331,6 +370,22 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
                 }
             }
 
+            if (backBytes != null && backBytes.Length > 0)
+            {
+                var effectiveBackMime = backMime ?? "image/jpeg";
+                var backBase64Data = Convert.ToBase64String(backBytes);
+                partsList.Add(new JsonObject
+                {
+                    ["inlineData"] = new JsonObject
+                    {
+                        ["mimeType"] = effectiveBackMime,
+                        ["data"] = backBase64Data
+                    }
+                });
+                backRetrieved = true;
+                _logger.LogInformation("Attached back card image ({Size} bytes, MIME: {Mime}) to Gemini request payload", backBytes.Length, effectiveBackMime);
+            }
+
             if (!frontRetrieved && !backRetrieved)
             {
                 retrievalFailure = "Card image(s) requested for multimodal visual verification could not be retrieved from storage.";
@@ -339,9 +394,29 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
 
         // Text prompt with 2D spatial layout, observations, and strict integrity rules
         var sb = new StringBuilder();
-        sb.AppendLine("You are the AI Business Card Intelligence Engine for Digital Share.");
-        sb.AppendLine("TASK: Multimodal visual verification, error reconciliation, and evidence-grounded parsing of business card details.");
-        sb.AppendLine("Ground every extracted or corrected field strictly in visible card pixels and provided source observation IDs.");
+        sb.AppendLine("You are the AI Business Card OCR and Intelligence Engine for Digital Share.");
+        sb.AppendLine();
+        sb.AppendLine("=== STAGE 1: COMPLETE VISUAL OCR ===");
+        sb.AppendLine("If a card image is attached, carefully read EVERY visible piece of text from the image pixels.");
+        sb.AppendLine("Do not rely solely on the OCR observations provided — treat the image as the primary source of truth.");
+        sb.AppendLine("OCR observations are provided as supplementary context and may contain errors that the image can correct.");
+        sb.AppendLine("Specifically look for and read:");
+        sb.AppendLine("- Person name (usually near a job title/designation, may have honorifics like Dr., Mr., Rtn., Adv., Er., CA)");
+        sb.AppendLine("- Job title / designation (e.g. Partner, Chairperson, Co-founder & CBO, Managing Director, CEO)");
+        sb.AppendLine("- Company / organization name (usually largest or most prominent text, often with LLC/LLP/Pvt Ltd/Ltd/Technologies/etc.)");
+        sb.AppendLine("- ALL telephone numbers including country codes, office numbers, mobile numbers (look carefully near phone/mobile/tel/fax icons)");
+        sb.AppendLine("- ALL email addresses (look for @ symbol)");
+        sb.AppendLine("- Website URLs");
+        sb.AppendLine("- Full postal address including building, street, area, city, state, PIN/ZIP code, country");
+        sb.AppendLine("- Social media handles, LinkedIn profiles");
+        sb.AppendLine("- Taglines, slogans, promotional text");
+        sb.AppendLine();
+        sb.AppendLine("=== STAGE 2: SEMANTIC CLASSIFICATION ===");
+        sb.AppendLine("After reading all text, classify each piece of text into the correct field.");
+        sb.AppendLine("Use semantic understanding, not just position. Key rules:");
+        sb.AppendLine();
+        sb.AppendLine("TASK: Multimodal visual verification, error reconciliation, and evidence-grounded extraction of business card details.");
+        sb.AppendLine("If image pixels are available, visually verify every field directly from the image. Visual evidence supersedes OCR text observations.");
         sb.AppendLine("Reasoning context for invocation: " + request.InvocationReason);
         sb.AppendLine();
         sb.AppendLine("CRITICAL DATA INTEGRITY & VISUAL VERIFICATION RULES (STRICT NEGATIVE CONSTRAINTS):");
@@ -350,13 +425,24 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
         sb.AppendLine("3. If text is blurry, occluded, or unreadable, mark isGenuinelyReadable = false, verificationStatus = 'reviewRequired', and set confidence < 0.70. Do NOT guess unreadable characters.");
         sb.AppendLine("4. NEVER infer a person's name from an email address or website domain name (e.g. do not infer 'John Doe' from 'johndoe@company.com').");
         sb.AppendLine("5. NEVER assume or invent a company name from a logo icon or artwork unless readable company text is clearly visible.");
-        sb.AppendLine("6. NEVER assign an organization, corporate entity, or company name (e.g. 'Apex Healthcare', 'Summit Consulting') to the fullName field.");
+        sb.AppendLine("6. NEVER assign an organization, corporate entity, or company name (e.g. 'Apex Healthcare', 'Summit Consulting', 'PELICAN NEST LLP', 'Eazymed Technologies') to the fullName field.");
         sb.AppendLine("7. NEVER assign a job title, occupational designation, or physical address line to the company field.");
         sb.AppendLine("8. NEVER move candidate values across fields without direct visual and OCR evidence.");
-        sb.AppendLine("9. Ground every field in sourceObservationIds referencing the exact observation IDs provided.");
+        sb.AppendLine("9. When a card image IS provided and you can read text from it, set isVisuallyVerified=true for every field you directly read from the image pixels.");
+        sb.AppendLine("   For visual extractions without matching OCR observation IDs, use sourceObservationIds=[] and set isVisuallyVerified=true.");
         sb.AppendLine("10. Front card observations and front image pixels must ONLY support front-side fields; back observations and back image pixels must ONLY support back-side fields.");
-        sb.AppendLine("11. Provide field-level structured output with verificationStatus ('verified', 'probable', 'reviewRequired', 'rejected', 'notFound'), isVisuallyVerified (true only if image is readable and verified against pixels), proposedValue, originalLocalParserValue, supportingCardSide, and visualEvidenceDescription.");
-        sb.AppendLine("12. PERSON NAME VS. COMPANY/ORGANIZATION DISAMBIGUATION: The first or most prominent text at the top of a card is frequently a Company or Brand name, NOT a Person's Name. If text represents an organization, business entity, brand, or contains corporate terms (e.g., Solutions, Technologies, Services, Enterprises, Labs, Consulting, Systems, Industries, Healthcare, Studio, Agency, Group), it MUST be assigned to 'company' and NEVER to 'fullName'. A person's name is typically adjacent to a job title (e.g., Director, Manager, Engineer, Founder) or preceded by honorifics (Dr., Prof., Mr., Ms.). If NO individual human person's name exists on the card, set fullName verificationStatus to 'notFound', value to null, and proposedValue to null. NEVER copy or leave a company name as fullName.");
+        sb.AppendLine("11. Provide field-level structured output with verificationStatus ('verified', 'probable', 'reviewRequired', 'rejected', 'notFound'), isVisuallyVerified (true if you read it directly from the image), proposedValue, originalLocalParserValue, supportingCardSide, and visualEvidenceDescription.");
+        sb.AppendLine("12. PERSON NAME VS. COMPANY/ORGANIZATION DISAMBIGUATION:");
+        sb.AppendLine("    - The largest or most prominent text on a card is OFTEN the company/organization name, NOT the person's name.");
+        sb.AppendLine("    - Decorative text, slogans, watermarks, logos, and stylized text should NOT be treated as person names.");
+        sb.AppendLine("    - A PERSON'S NAME typically appears near a job title/designation, is preceded by honorifics (Dr., Prof., Mr., Ms., Rtn.), or follows patterns like 'First Last' with 2-4 words.");
+        sb.AppendLine("    - If text represents an organization, brand, or contains corporate terms (Solutions, Technologies, Services, Enterprises, Labs, LLP, Ltd, Pvt), assign to 'company' field NEVER 'fullName'.");
+        sb.AppendLine("    - If NO individual human person's name can be identified on the card, set fullName verificationStatus to 'notFound', value to null.");
+        sb.AppendLine("    - NEVER copy or leave a company name as fullName. NEVER copy or assign a company/brand name to fullName. NEVER assign the most prominent decorative text as the name.");
+        sb.AppendLine("13. PHONE NUMBER EXTRACTION: Extract ALL visible phone numbers including those near icons. Preserve country codes (+91, +1, etc.), area codes, and extensions. Indian numbers: mobile typically 10 digits, office may include STD code (like +91 44 xxxx xxxx for Chennai). If multiple numbers are shown with slashes (e.g. '+91 44 4202 3412/13'), extract both complete numbers: '+91 44 4202 3412' and '+91 44 4202 3413'.");
+        sb.AppendLine("14. EMAIL EXTRACTION: Extract ALL email addresses. Preserve exact spelling. Never duplicate email addresses. If email is partially obscured, include what is readable with reviewRequired=true.");
+        sb.AppendLine("15. ADDRESS EXTRACTION: Extract the complete postal address. Indian addresses typically include building/plot number, street name, area/locality, city, state, PIN code. Preserve the full multi-line address.");
+        sb.AppendLine("16. When you correct an on-device OCR error using image evidence, explain what you saw in visualEvidenceDescription.");
         sb.AppendLine();
 
         if (request.UncertainFields != null && request.UncertainFields.Any())
@@ -441,12 +527,54 @@ public class GeminiCardAnalysisService : IGeminiCardAnalysisService
                         ["mimeType"] = "APPLICATION_JSON",
                         ["schema"] = schema
                     }
-                }
+                },
+                ["temperature"] = 0.1,
+                ["maxOutputTokens"] = 4096
             }
         };
 
         var payload = root.ToJsonString(PayloadSerializerOptions);
         return (payload, frontRetrieved, backRetrieved, retrievalFailure);
+    }
+
+    private static string? DetectImageMimeType(byte[] bytes)
+    {
+        if (bytes == null || bytes.Length < 12)
+        {
+            return null;
+        }
+
+        // JPEG: FF D8 FF
+        if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+        {
+            return "image/jpeg";
+        }
+
+        // PNG: 89 50 4E 47 0D 0A 1A 0A
+        if (bytes.Length >= 8 &&
+            bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
+            bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A)
+        {
+            return "image/png";
+        }
+
+        // WebP: RIFF .... WEBP
+        if (bytes.Length >= 12 &&
+            bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+            bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50)
+        {
+            return "image/webp";
+        }
+
+        // GIF: GIF87a or GIF89a
+        if (bytes.Length >= 6 &&
+            bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38 &&
+            (bytes[4] == 0x37 || bytes[4] == 0x39) && bytes[5] == 0x61)
+        {
+            return "image/gif";
+        }
+
+        return null;
     }
 
     public JsonObject BuildGeminiJsonSchema()

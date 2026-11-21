@@ -32,6 +32,8 @@ class ApiConfig {
   static String get logoutEndpoint => '$baseUrl/api/auth/logout';
   static String get logoutAllEndpoint => '$baseUrl/api/auth/logout-all';
   static String get deleteAccountEndpoint => '$baseUrl/api/auth/delete-account';
+  static String get forgotPasswordEndpoint => '$baseUrl/api/auth/forgot-password';
+  static String get resetPasswordEndpoint => '$baseUrl/api/auth/reset-password';
 
   // Profile endpoints
   static String get profileMeEndpoint => '$baseUrl/api/profile/me';

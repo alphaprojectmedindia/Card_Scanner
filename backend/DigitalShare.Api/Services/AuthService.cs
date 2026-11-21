@@ -5,6 +5,7 @@ using DigitalShare.Api.Data;
 using DigitalShare.Api.DTOs.Auth;
 using DigitalShare.Api.DTOs.Consent;
 using DigitalShare.Api.Models;
+using DigitalShare.Api.Services.Email;
 using DigitalShare.Api.Services.Storage;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,7 @@ public class AuthService : IAuthService
     private readonly JwtOptions _jwtOptions;
     private readonly IScanImageStorageService? _scanStorageService;
     private readonly IFileStorageService? _fileStorageService;
+    private readonly ISmtpEmailService _smtpEmailService;
 
     public AuthService(
         UserManager<ApplicationUser> userManager,
@@ -31,7 +33,8 @@ public class AuthService : IAuthService
         ILogger<AuthService> logger,
         IOptions<JwtOptions>? jwtOptions = null,
         IScanImageStorageService? scanStorageService = null,
-        IFileStorageService? fileStorageService = null)
+        IFileStorageService? fileStorageService = null,
+        ISmtpEmailService? smtpEmailService = null)
     {
         _userManager = userManager;
         _dbContext = dbContext;
@@ -41,6 +44,9 @@ public class AuthService : IAuthService
         _jwtOptions = jwtOptions?.Value ?? new JwtOptions();
         _scanStorageService = scanStorageService;
         _fileStorageService = fileStorageService;
+        _smtpEmailService = smtpEmailService ?? new GmailSmtpEmailService(
+            Options.Create(new SmtpOptions()),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<GmailSmtpEmailService>.Instance);
     }
 
     /// <summary>
@@ -183,27 +189,26 @@ public class AuthService : IAuthService
     {
         ApplicationUser? user = null;
 
-        if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
+        if (!string.IsNullOrWhiteSpace(request.Email))
+        {
+            var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+            user = await _userManager.FindByEmailAsync(normalizedEmail);
+        }
+        else if (!string.IsNullOrWhiteSpace(request.PhoneNumber))
         {
             var normalizedPhone = request.PhoneNumber.Trim();
             user = await _userManager.Users.FirstOrDefaultAsync(u => u.PhoneNumber == normalizedPhone);
         }
 
-        if (user == null && !string.IsNullOrWhiteSpace(request.Email))
-        {
-            var normalizedEmail = request.Email.Trim().ToLowerInvariant();
-            user = await _userManager.FindByEmailAsync(normalizedEmail);
-        }
-
         if (user == null)
         {
-            return (false, null, "Invalid mobile number, email, or password.");
+            return (false, null, "Invalid email address or password.");
         }
 
         var isPasswordValid = await _userManager.CheckPasswordAsync(user, request.Password);
         if (!isPasswordValid)
         {
-            return (false, null, "Invalid mobile number, email, or password.");
+            return (false, null, "Invalid email address or password.");
         }
 
         // Issue short-lived access JWT + rotating refresh token
@@ -227,6 +232,68 @@ public class AuthService : IAuthService
         };
 
         return (true, response, null);
+    }
+
+    public async Task<(bool Success, string Message, string? DebugToken)> ForgotPasswordAsync(ForgotPasswordRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+        {
+            return (false, "A valid email address is required.", null);
+        }
+
+        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        var user = await _userManager.FindByEmailAsync(normalizedEmail);
+
+        // Security best practice: don't reveal whether user exists or not, but return consistent message
+        if (user == null)
+        {
+            _logger.LogInformation("Password reset requested for non-existent email {Email}", normalizedEmail);
+            return (true, "If an account with this email exists, a password reset link has been sent.", null);
+        }
+
+        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+
+        var (sent, emailError) = await _smtpEmailService.SendPasswordResetEmailAsync(
+            user.Email!,
+            token,
+            request.ClientResetBaseUrl);
+
+        if (!sent)
+        {
+            _logger.LogWarning("Failed sending reset email to {Email}: {Error}", user.Email, emailError);
+            return (false, emailError ?? "Failed to send password reset email. Please check SMTP configuration or try again later.", null);
+        }
+
+        return (true, "If an account with this email exists, a password reset link has been sent.", token);
+    }
+
+    public async Task<(bool Success, string? Error)> ResetPasswordAsync(ResetPasswordRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+        {
+            return (false, "A valid email address is required.");
+        }
+
+        var normalizedEmail = request.Email.Trim().ToLowerInvariant();
+        var user = await _userManager.FindByEmailAsync(normalizedEmail);
+        if (user == null)
+        {
+            return (false, "Invalid password reset request.");
+        }
+
+        var result = await _userManager.ResetPasswordAsync(user, request.Token, request.NewPassword);
+        if (!result.Succeeded)
+        {
+            var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+            _logger.LogWarning("Password reset failed for {Email}: {Errors}", normalizedEmail, errors);
+            return (false, string.IsNullOrWhiteSpace(errors) ? "Invalid or expired reset token." : errors);
+        }
+
+        // Security: Invalidate all existing refresh tokens after password reset
+        await RevokeAllUserRefreshTokensAsync(user.Id);
+
+        _logger.LogInformation("Password reset successfully for user {UserId} ({Email})", user.Id, normalizedEmail);
+        return (true, null);
     }
 
     public async Task<(bool Success, AuthResponse? Response, string? Error)> RefreshTokenAsync(string rawRefreshToken, string? ipAddress = null)

@@ -247,7 +247,7 @@ void main() {
       expect(find.byKey(const Key('camera_capture_shutter_button')), findsOneWidget);
     });
 
-    testWidgets('2. Multi-frame stability tracking advances guidance to auto-capture', (tester) async {
+    testWidgets('2. Multi-frame stability tracking advances guidance to manual capture ready', (tester) async {
       late BusinessCardDetectionResult testDetection;
 
       final testCorners = CardCorners(
@@ -311,10 +311,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Aligning & focusing (2/3)...'), findsOneWidget);
 
-      // Frame 3: Stable for 3 frames -> Auto-capturing
+      // Frame 3: Stable for 3 frames -> Ready for manual capture
       state.testProcessDetection(testDetection);
       await tester.pumpAndSettle();
-      expect(find.text('Hold steady — Capturing automatically...'), findsOneWidget);
+      expect(find.text('Card aligned & steady — Tap Capture to scan'), findsOneWidget);
     });
 
     testWidgets('2b. Default 10-frame consecutive stabilization pipeline requires 10 stable detections', (tester) async {
@@ -381,10 +381,10 @@ void main() {
         expect(find.text('Aligning & focusing ($i/10)...'), findsOneWidget);
       }
 
-      // Frame 10: 10 consecutive stable frames reached -> CAPTURING
+      // Frame 10: 10 consecutive stable frames reached -> Ready for manual capture
       state.testProcessDetection(testDetection);
       await tester.pumpAndSettle();
-      expect(find.text('Hold steady — Capturing automatically...'), findsOneWidget);
+      expect(find.text('Card aligned & steady — Tap Capture to scan'), findsOneWidget);
     });
 
     testWidgets('3. Corner movement/jitter resets stability counter', (tester) async {

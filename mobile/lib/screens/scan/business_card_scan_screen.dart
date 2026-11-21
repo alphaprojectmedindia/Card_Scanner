@@ -376,7 +376,8 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
         e.message ??
             'Unable to access the camera or gallery. Please check permissions.',
       );
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('[PickImage Error] $e\n$stack');
       await PendingCardCaptureStore.clear();
       if (!mounted) return;
       _showErrorDialog(
@@ -930,7 +931,7 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
       if (!mounted) return;
 
       // Navigate to Review Details Screen
-      await Navigator.of(context).push(
+      final savedCard = await Navigator.of(context).push<BusinessCardData>(
         MaterialPageRoute(
           builder: (_) => BusinessCardReviewScreen(
             cardData: finalCardData,
@@ -949,6 +950,9 @@ class _BusinessCardScanScreenState extends State<BusinessCardScanScreen>
           ),
         ),
       );
+      if (savedCard != null && mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     } on CardNormalizationException catch (_) {
       if (!mounted || _scanSessionId != currentSession) return;
       setState(() {

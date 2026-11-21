@@ -207,12 +207,17 @@ class CardAnalysisDecisionService {
       return CardAnalysisDecision.noInvocation;
     }
 
-    // Determine Path A (textOnly) vs Path B (multimodalVision)
+    // Determine Path A (textOnly) vs Path B (multimodalVision).
+    // IMPORTANT: Always prefer multimodal (Path B) when an image is available.
+    // Even if no "recommend multimodal" trigger fired, the image provides far superior
+    // accuracy for business cards with logos, mixed layouts, and small font text.
+    // Path A (textOnly) is only used as a last resort when no image file exists.
     AnalysisMode selectedMode = AnalysisMode.textOnly;
     final hasImage = (frontOcr.imagePath.isNotEmpty && File(frontOcr.imagePath).existsSync()) ||
         (backOcr != null && backOcr.imagePath.isNotEmpty && File(backOcr.imagePath).existsSync());
 
-    if (recommendMultimodal && hasImage) {
+    if (hasImage) {
+      // Always use multimodal when an image is present — image is the ground truth.
       selectedMode = AnalysisMode.multimodalVision;
     }
 
